@@ -25,7 +25,6 @@ let state = {
 
 // ─── Case type config ─────────────────────────────────────────────────────
 const CASE_TYPES = {
-  shipment_delay:      { order: '402', symptom: 'shipment stuck at Hubli for 6 days, buyer cancelling, Monday market deadline' },
   payment_hold:        { order: '501', symptom: 'payment held by bank for delivered order, buyer threatening legal action' },
   inventory_mismatch:  { order: '502', symptom: 'stock mismatch between system and physical count, order short by 10 units' },
   customs_block:       { order: '503', symptom: 'customs hold at Mumbai port, documents incomplete, clearance stuck 5 days' },

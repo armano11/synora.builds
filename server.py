@@ -87,8 +87,8 @@ async def api_investigate(req: InvestigateRequest):
         order_id = req.order_id or CASE_ORDERS.get(req.case_type, "402")
         symptom = req.symptom or CASE_SYMPTOMS[req.case_type]
     else:
-        order_id = req.order_id or "402"
-        symptom = req.symptom or "shipment stuck"
+        order_id = req.order_id or "501"
+        symptom = req.symptom or "payment held by bank"
     
     case_id = f"manual-{order_id}-{uuid4().hex[:8]}"
     case = CasePayload(
@@ -383,7 +383,7 @@ async def _start_telegram_poller():
                 case = CasePayload(
                     case_id=case_id,
                     order_id=pending["order_id"],
-                    symptom="shipment stuck",
+                    symptom="operations issue reported",
                     source="email",
                 )
                 _register_case(case)

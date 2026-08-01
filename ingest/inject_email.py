@@ -24,8 +24,8 @@ from contracts import CasePayload
 from ingest.pending import create_pending_case
 
 DEFAULTS = {
-    "symptom": "shipment stuck",
-    "summary": "customer reports stuck order",
+    "symptom": "payment held by bank",
+    "summary": "customer reports payment issue",
     "intent": "angry_customer",
     "urgency": "high",
     "sender": "ops-internal@orbit.local",

@@ -109,7 +109,7 @@ async def router_node(state: InvestigationState) -> dict:
     )
     case_type = choice.case_type
     if case_type not in load_playbook()["case_types"]:
-        case_type = "shipment_delay"
+        case_type = "payment_hold"
 
     hypotheses = hypotheses_for(case_type)
     rationale_llm = get_llm().with_structured_output(_HypothesisRationales)
@@ -268,7 +268,7 @@ def _make_investigator_wrapper(investigator: str, trace_label: str, node_factory
         # Get the right node for this hypothesis
         if node_factory:
             # Get all hypothesis IDs for eligible_ids
-            case_type = state.get("case_type", "shipment_delay")
+            case_type = state.get("case_type") or "payment_hold"
             all_hyps = hypotheses_for(case_type)
             eligible_ids = [h.id for h in all_hyps]
             node = node_factory(hypothesis.id, eligible_ids)

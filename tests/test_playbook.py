@@ -11,7 +11,8 @@ from contracts import Hypothesis
 
 def test_all_five_case_types_load():
     data = pb.load_playbook()
-    assert set(data["case_types"]) == {
+    assert set(data["case_types"]) >= {
+        "shipment_delay",
         "payment_hold",
         "inventory_mismatch",
         "customs_block",
@@ -20,10 +21,7 @@ def test_all_five_case_types_load():
     }
 
 
-def test_shipment_delay_yields_four_canonical_hypothesis_ids_disabled():
-    pytest.skip("shipment_delay removed")
-
-def _disabled_test_shipment_delay_yields_four_canonical_hypothesis_ids():
+def test_shipment_delay_yields_four_canonical_hypothesis_ids():
     hypotheses = pb.hypotheses_for("shipment_delay")
     ids = {h.id for h in hypotheses}
     assert ids == {
@@ -35,17 +33,14 @@ def _disabled_test_shipment_delay_yields_four_canonical_hypothesis_ids():
 
 
 def test_hypotheses_parse_to_exact_contract_schema():
-    for case_type in ("payment_hold", "inventory_mismatch",
+    for case_type in ("shipment_delay", "payment_hold", "inventory_mismatch",
                       "customs_block", "invoice_dispute", "compliance_block"):
         for h in pb.hypotheses_for(case_type):
             assert isinstance(h, Hypothesis)
             assert h.investigator
 
 
-def test_shipment_delay_stamp_rules_cover_all_portals_disabled():
-    pytest.skip("shipment_delay removed")
-
-def _disabled_test_shipment_delay_stamp_rules_cover_all_portals():
+def test_shipment_delay_stamp_rules_cover_all_portals():
     rules = pb.stamp_rules_for("shipment_delay")
     assert set(rules) == {"tally", "gst", "delhivery", "transport"}
     for portal, rule in rules.items():

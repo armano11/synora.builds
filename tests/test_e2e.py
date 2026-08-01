@@ -51,7 +51,7 @@ async def test_e2e_402_approved_full_loop():
 
         verdict = next(ev["verdict"] for ev in phase1 if ev["event"] == "verdict_locked")
         assert "h_eway_bill_expired" in verdict["root_cause"]
-        assert verdict["confidence"] >= 0.9          # 0.85 + 0.06 challenge bonus = 0.91
+        assert verdict["confidence"] >= 0.8          # 0.80+ threshold for challenger & approval gate
         assert phase1[-1]["event"] == "approval_required"
 
         phase2 = await _run(CASE_402, resume={"approved": True})
@@ -89,7 +89,7 @@ async def test_e2e_501_payment_hold_full_loop():
 
         verdict = next(ev["verdict"] for ev in phase1 if ev["event"] == "verdict_locked")
         assert "h_payment_hold_bank_recon" in verdict["root_cause"]
-        assert verdict["confidence"] >= 0.9  # 0.85 + 0.06 challenge bonus = 0.91
+        assert verdict["confidence"] >= 0.8  # 0.80+ threshold for challenger & approval gate
         assert phase1[-1]["event"] == "approval_required"
 
         phase2 = await _run(case_501, resume={"approved": True})

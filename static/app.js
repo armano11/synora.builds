@@ -25,6 +25,7 @@ let state = {
 
 // ─── Case type config ─────────────────────────────────────────────────────
 const CASE_TYPES = {
+  shipment_delay:      { order: '402', symptom: 'shipment stuck at Hubli for 6 days, buyer cancelling, Monday market deadline' },
   payment_hold:        { order: '501', symptom: 'payment held by bank for delivered order, buyer threatening legal action' },
   inventory_mismatch:  { order: '502', symptom: 'stock mismatch between system and physical count, order short by 10 units' },
   customs_block:       { order: '503', symptom: 'customs hold at Mumbai port, documents incomplete, clearance stuck 5 days' },
@@ -715,24 +716,6 @@ async function loadCases() {
       hidePendingBanner();
     }
   } catch {}
-}
-
-
-
-    const statusColor = c.status === 'closed' ? '#22c55e' : c.status === 'active' ? '#f5a623' : c.status === 'awaiting_approval' ? '#f5a623' : '#ffffff40';
-    const conf = c.confidence ? Math.round(c.confidence * 100) + '%' : '';
-    return `
-      <div class="case-item${isActive ? ' active-case' : '}" data-case-id="${escHtml(c.case_id)}" onclick="if('${c.status}'==='active'||'${c.status}'==='awaiting_approval'){state.activeCaseId='${escHtml(c.case_id)}';state.startTime=Date.now();connectSSE('${escHtml(c.case_id)}');}">
-        <div class="flex items-center gap-1.5">
-          <div class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${statusColor}"></div>
-          <span class="font-mono text-[10px] text-white/60 truncate">#${escHtml(c.order_id)}</span>
-          ${conf ? `<span class="font-mono text-[9px] text-white/25 ml-auto">${conf}</span>` : ''}
-        </div>
-        ${c.case_type ? `<div class="font-mono text-[9px] text-white/20 mt-0.5 ml-3">${escHtml(c.case_type.replace(/_/g,' '))}</div>` : ''}
-        ${c.verdict_summary ? `<div class="font-mono text-[9px] text-white/15 mt-0.5 ml-3 truncate">${escHtml(c.verdict_summary.substring(0,50))}</div>` : ''}
-      </div>
-    `;
-  }).join('');
 }
 
 function renderCases(cases) {

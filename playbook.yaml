@@ -4,6 +4,47 @@
 # This file is the answer to "why not just a chatbot?".
 
 case_types:
+  shipment_delay:
+    triggers: ["stuck", "delay", "cancelling", "late", "where is my order", "delivery pending"]
+    hypotheses:
+      - id: h_eway_bill_expired
+        label: "E-Way bill expired in transit"
+        investigator: gst
+        check: {db: gst_portal, table: eway_bills, key: order_id}
+        eliminates_if_clean: [h_eway_bill_expired]
+      - id: h_inventory_damage
+        label: "Damaged in warehouse during picking"
+        investigator: inventory
+        check: {db: tally_erp, table: orders, key: order_id}
+        eliminates_if_clean: [h_inventory_damage]
+      - id: h_dispatch_failure
+        label: "Dispatch scan missed at warehouse"
+        investigator: delhivery
+        check: {db: delhivery, table: tracking, key: order_id}
+        eliminates_if_clean: [h_dispatch_failure]
+      - id: h_transport_breakdown
+        label: "Vehicle breakdown on highway"
+        investigator: transport
+        check: {db: transport, table: bookings, key: order_id}
+        eliminates_if_clean: [h_transport_breakdown]
+    portal_stamp_rules:
+      tally:
+        if: "order_status=Dispatched and stock_booked=0"
+        stamp: "STALE"
+        reason: "record says dispatched but physical count was never debited"
+      gst:
+        if: "eway_bill=expired"
+        stamp: "TRUE"
+        reason: "expired permit is blocking movement"
+      delhivery:
+        if: "last_scan > 48h and status != Delivered"
+        stamp: "STALE"
+        reason: "no scan in 48h confirms transit halt"
+      transport:
+        if: "breakdown_claimed=1 and eway_bill=expired"
+        stamp: "MISLEADING"
+        reason: "driver claimed breakdown to cover for expired permit"
+
   payment_hold:
     triggers: ["payment held", "cheque returned", "no payment received", "bank hold"]
     hypotheses:

@@ -416,7 +416,7 @@ async def _start_telegram_poller():
                     symptom=symptom,
                     source=source,
                 )
-                await _run_investigation(case, resume={"approved": approved})
+                asyncio.create_task(_run_investigation(case, resume={"approved": approved}))
             else:
                 # INVESTIGATE button pressed — use real symptom from pending case
                 pending = get_pending_case(case_id)
@@ -440,7 +440,7 @@ async def _start_telegram_poller():
                         source="email",
                     )
                     _register_case(case)
-                    await _run_investigation(case)
+                    asyncio.create_task(_run_investigation(case))
                 elif case_id in _cases:
                     case = CasePayload(
                         case_id=case_id,
@@ -448,7 +448,7 @@ async def _start_telegram_poller():
                         symptom=_cases[case_id]["symptom"],
                         source=_cases[case_id]["source"],
                     )
-                    await _run_investigation(case)
+                    asyncio.create_task(_run_investigation(case))
                 else:
                     log.warning(f"Telegram investigate: case {case_id} not found")
 

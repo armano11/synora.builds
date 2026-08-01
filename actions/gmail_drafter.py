@@ -69,19 +69,25 @@ def _load_credentials() -> Credentials:
 def _buyer_email(sender: str | None) -> str:
     """The usable To address from the case sender, or fallback for demo/manual cases.
 
-    Accepts plain emails ("priya@example.com"), "Name <email>" display-name
-    format, and bare dot-domains. Falls back to "buyer@example.com" if missing.
+    Checks BUYER_EMAIL_OVERRIDE or DEFAULT_BUYER_EMAIL in env first, then parses sender.
+    If sender is a placeholder or missing, defaults to abdulhafeel223@gmail.com.
     """
+    override = os.environ.get("BUYER_EMAIL_OVERRIDE") or os.environ.get("DEFAULT_BUYER_EMAIL") or os.environ.get("TEST_BUYER_EMAIL")
+    if override and "@" in override:
+        return override.strip()
+
     if not sender:
-        return "buyer@example.com"
+        return "abdulhafeel223@gmail.com"
     bracketed = re.search(r"<([^<>@]+@[^<>@]+)>", sender)
     if bracketed:
-        return bracketed.group(1).strip()
-    if "@" in sender:
+        addr = bracketed.group(1).strip()
+        if "example.com" not in addr and "orbit.local" not in addr:
+            return addr
+    if "@" in sender and "example.com" not in sender and "orbit.local" not in sender:
         return sender
-    if "." in sender and " " not in sender:
+    if "." in sender and " " not in sender and "example.com" not in sender and "orbit.local" not in sender:
         return sender
-    return "buyer@example.com"
+    return "abdulhafeel223@gmail.com"
 
 
 def _greeting(recipient: str) -> str:

@@ -104,7 +104,7 @@ async def router_node(state: InvestigationState) -> dict:
     if not case_type or case_type not in playbook:
         s = (case.symptom or "").lower()
         if "stuck" in s or "delay" in s or "hubli" in s or "eway" in s:
-            case_type = "payment_hold"
+            case_type = "shipment_delay"
         elif "payment" in s or "bank" in s or "held" in s or "legal" in s:
             case_type = "payment_hold"
         elif "stock" in s or "inventory" in s or "mismatch" in s or "count" in s:
@@ -116,8 +116,8 @@ async def router_node(state: InvestigationState) -> dict:
         elif "license" in s or "grounded" in s or "compliance" in s:
             case_type = "compliance_block"
         else:
-            order_map = {"402": "payment_hold", "501": "payment_hold", "502": "inventory_mismatch", "503": "customs_block", "504": "invoice_dispute", "505": "compliance_block"}
-            case_type = order_map.get(str(case.order_id), "payment_hold")
+            order_map = {"402": "shipment_delay", "501": "payment_hold", "502": "inventory_mismatch", "503": "customs_block", "504": "invoice_dispute", "505": "compliance_block"}
+            case_type = order_map.get(str(case.order_id), "shipment_delay")
 
     hypotheses = hypotheses_for(case_type)
     rationale_llm = get_llm().with_structured_output(_HypothesisRationales)
@@ -363,7 +363,7 @@ def evaluate_condition(condition: str, facts: dict) -> bool:
                 equal = str(actual).lower() == value.strip("\"'").lower()
                 return equal if op == "=" else not equal
             try:
-                a, b = float(actual), float(value)
+                a, b = float(actual), float(value.rstrip("h"))
             except (TypeError, ValueError):
                 return False
             return {"<": a < b, ">": a > b}[op]
@@ -403,9 +403,13 @@ def facts_from_evidence(evidence: list[Evidence]) -> dict:
         if "last_scan_at" in raw:
             try:
                 scan = datetime.strptime(raw["last_scan_at"], "%Y-%m-%d %H:%M:%S").date()
-                facts["last_scan_age_days"] = (SCENARIO_TODAY - scan).days
+                age_days = (SCENARIO_TODAY - scan).days
+                facts["last_scan_age_days"] = age_days
+                facts["last_scan"] = age_days * 24
             except ValueError:
                 pass
+            if "status" in raw:
+                facts["status"] = raw["status"]
         # Also extract from items (inventory mismatch)
         if "items" in raw and raw["items"]:
             for item in raw["items"]:

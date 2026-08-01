@@ -247,10 +247,13 @@ async def send_case_closed_alert(
 
 # ---------------------------------------------------------------------------
 # 5. SEND GMAIL DRAFT — actually sends the draft via Gmail API
-# ---------------------------------------------------------------------------
+_SENT_DRAFTS: dict[str, str] = {}
 
 async def send_gmail_draft(draft_id: str) -> ActionResult:
-    """Send a previously created Gmail draft (makes it a real email)."""
+    """Send a previously created Gmail draft (makes it a real email). Idempotent."""
+    if draft_id in _SENT_DRAFTS:
+        return ActionResult(type="gmail_draft", status="sent", ref=_SENT_DRAFTS[draft_id])
+
     try:
         from actions.gmail_drafter import _load_credentials, _token_path
         from google.auth.transport.requests import Request
@@ -265,8 +268,13 @@ async def send_gmail_draft(draft_id: str) -> ActionResult:
         service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         result = service.users().drafts().send(userId="me", body={"id": draft_id}).execute()
         msg_id = result.get("id", "unknown")
+        _SENT_DRAFTS[draft_id] = str(msg_id)
         return ActionResult(type="gmail_draft", status="sent", ref=str(msg_id))
     except Exception as exc:
+        if "404" in str(exc) or "notFound" in str(exc):
+            if draft_id in _SENT_DRAFTS:
+                return ActionResult(type="gmail_draft", status="sent", ref=_SENT_DRAFTS[draft_id])
+            return ActionResult(type="gmail_draft", status="failed", error="Draft already sent or no longer exists")
         return ActionResult(type="gmail_draft", status="failed", error=f"Gmail send failed: {exc}")
 
 

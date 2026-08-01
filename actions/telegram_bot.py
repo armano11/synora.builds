@@ -247,19 +247,23 @@ async def send_case_closed_alert(
 
 # ---------------------------------------------------------------------------
 # 5. SEND GMAIL DRAFT — actually sends the draft via Gmail API
-_SENT_DRAFTS: dict[str, str] = {}
+# ---------------------------------------------------------------------------
 
 async def send_gmail_draft(draft_id: str) -> ActionResult:
-    """Send a previously created Gmail draft (makes it a real email). Idempotent."""
-    if draft_id in _SENT_DRAFTS:
-        return ActionResult(type="gmail_draft", status="sent", ref=_SENT_DRAFTS[draft_id])
-
+    """Send a previously created Gmail draft (makes it a real email)."""
     try:
-        from actions.gmail_drafter import _load_credentials, _token_path
+        from actions.gmail_drafter import _token_path
         from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        creds = _load_credentials()
+        # Load with send scope (broader than compose)
+        SEND_SCOPES = [
+            "https://www.googleapis.com/auth/gmail.send",
+            "https://www.googleapis.com/auth/gmail.compose",
+            "https://www.googleapis.com/auth/gmail.modify",
+        ]
+        creds = Credentials.from_authorized_user_file(str(_token_path()), SEND_SCOPES)
         if not creds.valid:
             if creds.expired and creds.refresh_token:
                 creds.refresh(Request())
@@ -268,13 +272,8 @@ async def send_gmail_draft(draft_id: str) -> ActionResult:
         service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         result = service.users().drafts().send(userId="me", body={"id": draft_id}).execute()
         msg_id = result.get("id", "unknown")
-        _SENT_DRAFTS[draft_id] = str(msg_id)
         return ActionResult(type="gmail_draft", status="sent", ref=str(msg_id))
     except Exception as exc:
-        if "404" in str(exc) or "notFound" in str(exc):
-            if draft_id in _SENT_DRAFTS:
-                return ActionResult(type="gmail_draft", status="sent", ref=_SENT_DRAFTS[draft_id])
-            return ActionResult(type="gmail_draft", status="failed", error="Draft already sent or no longer exists")
         return ActionResult(type="gmail_draft", status="failed", error=f"Gmail send failed: {exc}")
 
 

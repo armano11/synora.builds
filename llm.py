@@ -93,7 +93,23 @@ def _is_transient(exc: Exception) -> bool:
 
 # The free tier throttles concurrent calls (429 storms under Send() fan-out);
 # a global cap keeps the demo alive without changing the graph topology.
-_LLM_SEMAPHORE = asyncio.Semaphore(2)
+# Lazy + loop-aware: the semaphore must be bound to the running event loop.
+# If the loop changes (e.g. pytest creates a new one per test), we recreate it.
+_LLM_SEMAPHORE: asyncio.Semaphore | None = None
+_LLM_SEMAPHORE_LOOP_ID: int | None = None
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    global _LLM_SEMAPHORE, _LLM_SEMAPHORE_LOOP_ID
+    try:
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+    except RuntimeError:
+        loop_id = 0
+    if _LLM_SEMAPHORE is None or _LLM_SEMAPHORE_LOOP_ID != loop_id:
+        _LLM_SEMAPHORE = asyncio.Semaphore(2)
+        _LLM_SEMAPHORE_LOOP_ID = loop_id
+    return _LLM_SEMAPHORE
 
 # Hard per-call ceiling. The OpenAI client's own timeout is NOT reliable on a
 # congested provider — a hung call would otherwise stall the graph forever
@@ -110,7 +126,7 @@ async def ainvoke_with_retry(runnable, messages: list, attempts: int = 5, backof
     used to mask real errors — the final attempt's exception still
     propagates (as asyncio.TimeoutError when the provider stalls).
     """
-    async with _LLM_SEMAPHORE:
+    async with _get_semaphore():
         last: Exception | None = None
         for attempt in range(attempts):
             try:

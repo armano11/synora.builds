@@ -31,14 +31,37 @@ DEFAULTS = {
     "sender": "ops-internal@orbit.local",
 }
 
+# Per-case-type demo symptoms for multi-case injection
+CASE_SYMPTOMS = {
+    "shipment_delay": "shipment stuck at Hubli for 6 days, buyer cancelling, Monday market deadline",
+    "payment_hold": "payment held by bank for delivered order, buyer threatening legal action",
+    "inventory_mismatch": "stock mismatch between system and physical count, order short by 10 units",
+    "customs_block": "customs hold at Mumbai port, documents incomplete, clearance stuck 5 days",
+    "invoice_dispute": "invoice amount dispute, buyer refusing payment, billing error of 4000 rupees",
+    "compliance_block": "transport license expired, vehicle grounded, shipment not moving",
+}
+
+# Map case types to their anchor order IDs
+CASE_ORDERS = {
+    "shipment_delay": "402",
+    "payment_hold": "501",
+    "inventory_mismatch": "502",
+    "customs_block": "503",
+    "invoice_dispute": "504",
+    "compliance_block": "505",
+}
+
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="ingest.inject_email",
         description="Inject a pending case directly (demo dev fallback).",
     )
-    parser.add_argument("--order", required=True, help="order id, digits only")
-    parser.add_argument("--symptom", default=DEFAULTS["symptom"])
+    parser.add_argument("--order", required=False, default=None, help="order id, digits only")
+    parser.add_argument("--case-type", default=None,
+                        choices=list(CASE_SYMPTOMS.keys()),
+                        help="inject a specific case type with its anchor order")
+    parser.add_argument("--symptom", default=None)
     parser.add_argument("--summary", default=DEFAULTS["summary"])
     parser.add_argument("--intent", default=DEFAULTS["intent"])
     parser.add_argument("--urgency", default=DEFAULTS["urgency"])
@@ -48,13 +71,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    if not args.order.isdigit():
-        print(f"Error: order id must be digits, got: {args.order!r}")
+    
+    # Case-type-based injection
+    if args.case_type:
+        order_id = CASE_ORDERS.get(args.case_type, args.order or "402")
+        symptom = args.symptom or CASE_SYMPTOMS[args.case_type]
+    else:
+        if not args.order:
+            print("Error: --order or --case-type is required")
+            return 1
+        order_id = args.order
+        symptom = args.symptom or DEFAULTS["symptom"]
+    
+    if not order_id.isdigit():
+        print(f"Error: order id must be digits, got: {order_id!r}")
         return 1
     case = CasePayload(
-        case_id=f"cli-{args.order}-{uuid4().hex[:8]}",
-        order_id=args.order,
-        symptom=args.symptom,
+        case_id=f"cli-{order_id}-{uuid4().hex[:8]}",
+        order_id=order_id,
+        symptom=symptom,
         source="cli",
         sender=args.sender,
         intent=args.intent,

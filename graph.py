@@ -159,6 +159,7 @@ async def router_node(state: InvestigationState) -> dict:
         "case_type": case_type,
         "hypotheses": enriched,
         "loop_count": state.get("loop_count", 0) + (1 if state.get("evidence") else 0),
+        "challenge": None,  # clear stale challenge on re-entry (fixes refutation retry)
         "trace": [f"> router: case type={case_type}, {len(enriched)} hypotheses"] + skipped,
     }
 
@@ -168,31 +169,80 @@ async def router_node(state: InvestigationState) -> dict:
 
 _SYNTH_KEYS = ("case_type", "hypotheses", "evidence", "verdict", "challenge", "started_at")
 
+# All investigators are wired — the graph dispatches dynamically based on
+# the hypothesis's investigator field from playbook.yaml.
+# Each investigator module has a make_node(hypothesis_id, eligible_ids) factory.
+_INVESTIGATOR_FACTORIES = {
+    "gst": gst_investigator.make_node,
+    "inventory": inventory_investigator.make_node,
+    "warehouse": warehouse_investigator.make_node,
+    "transport": transport_investigator.make_node,
+}
+
+# Extra cross-check investigators (like delhivery for dispatch_failure)
+_EXTRA_CHECK: dict[str, str] = {
+    "h_dispatch_failure": "investigator_delhivery",
+}
+
+# Pre-built nodes for the graph (one per investigator type)
 _WIRED: dict[str, str] = {
     "gst": "investigator_gst",
     "inventory": "investigator_inventory",
     "warehouse": "investigator_tally",
     "transport": "investigator_transport",
 }
-_EXTRA_CHECK: dict[str, str] = {
-    "h_dispatch_failure": "investigator_delhivery",
-}
+
+# Cache of dynamically created investigator nodes
+_DYNAMIC_NODES: dict[str, callable] = {}
+
+
+def _get_investigator_node(hypothesis_id: str, investigator: str, eligible_ids: list[str]):
+    """Get or create a cached investigator node for this hypothesis."""
+    cache_key = f"{investigator}:{hypothesis_id}"
+    if cache_key not in _DYNAMIC_NODES:
+        factory = _INVESTIGATOR_FACTORIES.get(investigator)
+        if factory:
+            _DYNAMIC_NODES[cache_key] = factory(hypothesis_id, eligible_ids)
+        else:
+            _log.warning("No investigator factory for: %s", investigator)
+            return None
+    return _DYNAMIC_NODES[cache_key]
+
 
 def fan_out(state: InvestigationState) -> list[Send]:
-    """Dispatch one investigator task per hypothesis not yet ruled out."""
+    """Dispatch one investigator task per hypothesis not yet ruled out.
+    
+    Each hypothesis gets dispatched to the appropriate investigator node
+    based on its `investigator` field from playbook.yaml. The investigator
+    node is selected dynamically based on the hypothesis ID, allowing
+    different case types to reuse the same investigator modules with
+    different prompts.
+    """
     eliminated = {
         hid for ev in state.get("evidence", []) for hid in ev.eliminates
     }
     sends: list[Send] = []
+    hypothesis_ids = [h.id for h in state.get("hypotheses", [])]
+    
     for h in state.get("hypotheses", []):
         if h.id in eliminated:
             continue
+        # Map investigator to graph node name
         node_name = _WIRED.get(h.investigator)
         if node_name:
-            sends.append(Send(node_name, {"case": state["case"], "hypothesis": h}))
+            sends.append(Send(node_name, {
+                "case": state["case"],
+                "hypothesis": h,
+                "case_type": state.get("case_type", "shipment_delay"),
+            }))
+        # Extra cross-checks
         extra = _EXTRA_CHECK.get(h.id)
         if extra:
-            sends.append(Send(extra, {"case": state["case"], "hypothesis": h}))
+            sends.append(Send(extra, {
+                "case": state["case"],
+                "hypothesis": h,
+                "case_type": state.get("case_type", "shipment_delay"),
+            }))
     if not sends:
         sends.append(Send("synthesizer", {k: state.get(k) for k in _SYNTH_KEYS}))
     return sends
@@ -201,13 +251,30 @@ def fan_out(state: InvestigationState) -> list[Send]:
 # Investigator wrappers
 # ---------------------------------------------------------------------------
 
-def _make_investigator_wrapper(investigator: str, trace_label: str, node):
+def _make_investigator_wrapper(investigator: str, trace_label: str, node_factory=None, default_node=None):
+    """Create a wrapper that dispatches to the right investigator node dynamically.
+    
+    For multi-hypothesis investigators (gst, inventory, warehouse, transport),
+    the wrapper looks up the hypothesis ID and creates/uses the appropriate
+    node with the correct system prompt for that hypothesis.
+    """
     async def wrapper(state: InvestigationState) -> dict:
         hypothesis = state["hypothesis"]
         _emit(
             {"event": "investigator_start", "investigator": investigator,
              "hypothesis_id": hypothesis.id}
         )
+        
+        # Get the right node for this hypothesis
+        if node_factory:
+            # Get all hypothesis IDs for eligible_ids
+            case_type = state.get("case_type", "shipment_delay")
+            all_hyps = hypotheses_for(case_type)
+            eligible_ids = [h.id for h in all_hyps]
+            node = node_factory(hypothesis.id, eligible_ids)
+        else:
+            node = default_node
+        
         try:
             result = await node(state)
         except Exception as exc:
@@ -238,18 +305,18 @@ def _make_investigator_wrapper(investigator: str, trace_label: str, node):
 
     return wrapper
 
-_investigator_gst = _make_investigator_wrapper("query_gst", "gst", gst_investigator.node)
+_investigator_gst = _make_investigator_wrapper("query_gst", "gst", node_factory=gst_investigator.make_node)
 _investigator_inventory = _make_investigator_wrapper(
-    "query_inventory", "inventory", inventory_investigator.node
+    "query_inventory", "inventory", node_factory=inventory_investigator.make_node
 )
 _investigator_tally = _make_investigator_wrapper(
-    "query_tally", "tally", warehouse_investigator.node
+    "query_tally", "tally", node_factory=warehouse_investigator.make_node
 )
 _investigator_transport = _make_investigator_wrapper(
-    "query_transport", "transport", transport_investigator.node
+    "query_transport", "transport", node_factory=transport_investigator.make_node
 )
 _investigator_delhivery = _make_investigator_wrapper(
-    "query_delhivery", "delhivery", delhivery_investigator.node
+    "query_delhivery", "delhivery", default_node=delhivery_investigator.node
 )
 
 # ---------------------------------------------------------------------------
@@ -308,20 +375,38 @@ def facts_from_evidence(evidence: list[Evidence]) -> dict:
         if "eway_status" in raw:
             facts["eway_bill"] = raw["eway_status"]
             facts["gstr3b_filed"] = raw.get("gstr3b_filed")
+            facts["docs_incomplete"] = raw.get("docs_incomplete", 0)
+            facts["tax_rate_wrong"] = raw.get("tax_rate_wrong", 0)
         if "transport_booking" in raw:
             facts["order_status"] = raw.get("status")
             facts["transport_booking"] = raw.get("transport_booking")
             facts["payment_received"] = raw.get("payment_received", 0)
+            facts["stock_booked"] = raw.get("stock_booked", 1)
+            facts["invoice_amount"] = raw.get("invoice_amount")
+            facts["po_amount"] = raw.get("po_amount")
+            facts["delivered"] = raw.get("delivered", 0)
         if "breakdown_claimed" in raw:
             facts["breakdown_claimed"] = raw.get("breakdown_claimed")
             facts["vehicle_no"] = raw.get("vehicle_no")
             facts["license_expired"] = raw.get("license_expired", 0)
+            facts["transport_delivered"] = raw.get("delivered", 0)
+            facts["breakdown_claimed"] = raw.get("breakdown_claimed")
+            facts["vehicle_no"] = raw.get("vehicle_no")
+            facts["license_expired"] = raw.get("license_expired", 0)
+            facts["transport_delivered"] = raw.get("delivered", 0)
         if "last_scan_at" in raw:
             try:
                 scan = datetime.strptime(raw["last_scan_at"], "%Y-%m-%d %H:%M:%S").date()
                 facts["last_scan_age_days"] = (SCENARIO_TODAY - scan).days
             except ValueError:
                 pass
+        # Also extract from items (inventory mismatch)
+        if "items" in raw and raw["items"]:
+            for item in raw["items"]:
+                if "stock" in item and "qty" in item:
+                    facts["stock"] = item.get("stock")
+                    facts["qty"] = item.get("qty")
+                    facts["picked"] = item.get("picked", 0)
     return facts
 
 # ---------------------------------------------------------------------------
@@ -421,19 +506,61 @@ def route_after_synthesis(state: InvestigationState) -> Literal["challenger", "r
 def approval_gate_node(state: InvestigationState) -> dict:
     """Read the honest pre-state, propose the fix, pause for human approval."""
     case = state["case"]
-    before = eq.query_gst(case.order_id)
     culprit = state["verdict"].root_cause.rsplit(".", 1)[-1]
-    if culprit == "h_eway_bill_expired":
-        proposed = (
+    before_gst = eq.query_gst(case.order_id)
+    before_tally = eq.query_tally(case.order_id)
+    before_transport = eq.query_transport(case.order_id)
+    
+    # Build proposed action based on culprit
+    _ACTIONS = {
+        "h_eway_bill_expired": lambda: (
             f"Renew e-way bill for order #{case.order_id} "
-            f"(currently {before.get('eway_status', 'unknown')})"
-        )
+            f"(currently {before_gst.get('eway_status', 'unknown')})",
+            {"eway_bill": before_gst.get("eway_status", "unknown")}
+        ),
+        "h_payment_hold_bank_recon": lambda: (
+            f"Release payment hold for order #{case.order_id} "
+            f"(payment_received={before_tally.get('payment_received', '?')}, "
+            f"delivered={before_tally.get('delivered', '?')})",
+            {"payment_received": before_tally.get("payment_received", 0),
+             "delivered": before_tally.get("delivered", 0)}
+        ),
+        "h_inventory_count_error": lambda: (
+            f"Correct cycle count for order #{case.order_id} "
+            f"(stock_booked={before_tally.get('stock_booked', '?')})",
+            {"stock_booked": before_tally.get("stock_booked", 1)}
+        ),
+        "h_customs_docs_incomplete": lambda: (
+            f"Re-upload customs documents for order #{case.order_id} "
+            f"(docs_incomplete={before_gst.get('docs_incomplete', '?')})",
+            {"docs_incomplete": before_gst.get("docs_incomplete", 0),
+             "eway_bill": before_gst.get("eway_status", "unknown")}
+        ),
+        "h_invoice_amount_mismatch": lambda: (
+            f"Issue credit note for order #{case.order_id} "
+            f"(invoice_amount={before_tally.get('invoice_amount', '?')}, "
+            f"po_amount={before_tally.get('po_amount', '?')})",
+            {"invoice_amount": before_tally.get("invoice_amount"),
+             "po_amount": before_tally.get("po_amount")}
+        ),
+        "h_compliance_license_expired": lambda: (
+            f"Renew transport license for order #{case.order_id} "
+            f"(license_expired={before_transport.get('license_expired', '?')})",
+            {"license_expired": before_transport.get("license_expired", 0)}
+        ),
+    }
+    
+    action_fn = _ACTIONS.get(culprit)
+    if action_fn:
+        proposed, before_payload = action_fn()
     else:
         proposed = f"Execute fix for {culprit}"
+        before_payload = {"culprit": culprit}
+    
     payload = {
         "type": "approval_required",
         "proposed_action": proposed,
-        "before": {"eway_bill": before.get("eway_status", "unknown")},
+        "before": before_payload,
     }
     _emit(
         {"event": "approval_required", "proposed_action": proposed,
@@ -460,26 +587,120 @@ def after_approval(state: InvestigationState) -> Literal["executor", "close_case
 def executor_node(state: InvestigationState) -> dict:
     case = state["case"]
     culprit = state["verdict"].root_cause.rsplit(".", 1)[-1]
-    before = eq.query_gst(case.order_id)
-    if culprit == "h_eway_bill_expired" and before.get("eway_status") == "expired":
+    order_id = case.order_id
+    
+    # E-way bill renewal (shipment_delay, customs_block)
+    if culprit in ("h_eway_bill_expired", "h_customs_docs_incomplete"):
+        before = eq.query_gst(order_id)
         conn = sqlite3.connect(DB_DIR / "gst_portal.db")
         try:
+            if culprit == "h_eway_bill_expired":
+                conn.execute(
+                    "UPDATE eway_bills SET eway_status = 'renewal_requested' WHERE order_id = ?",
+                    (order_id,),
+                )
+            else:  # customs_docs_incomplete
+                conn.execute(
+                    "UPDATE eway_bills SET docs_incomplete = 0, eway_status = 'renewal_requested' WHERE order_id = ?",
+                    (order_id,),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        after = eq.query_gst(order_id)
+        verified = after.get("eway_status") == "renewal_requested"
+        if culprit == "h_customs_docs_incomplete":
+            verified = verified and after.get("docs_incomplete") == 0
+        execution = ExecutionResult(
+            action="renew_eway_bill" if culprit == "h_eway_bill_expired" else "upload_customs_docs",
+            before={"eway_bill": before.get("eway_status"), "docs_incomplete": before.get("docs_incomplete")},
+            after={"eway_bill": after.get("eway_status"), "docs_incomplete": after.get("docs_incomplete")},
+            verified=verified,
+        )
+    
+    # Payment hold release
+    elif culprit == "h_payment_hold_bank_recon":
+        before = eq.query_tally(order_id)
+        conn = sqlite3.connect(DB_DIR / "tally_erp.db")
+        try:
             conn.execute(
-                "UPDATE eway_bills SET eway_status = 'renewal_requested' WHERE order_id = ?",
-                (case.order_id,),
+                "UPDATE orders SET payment_received = 1 WHERE order_id = ?",
+                (order_id,),
             )
             conn.commit()
         finally:
             conn.close()
-        after = eq.query_gst(case.order_id)
+        after = eq.query_tally(order_id)
         execution = ExecutionResult(
-            action="renew_eway_bill",
-            before={"eway_bill": before.get("eway_status")},
-            after={"eway_bill": after.get("eway_status")},
-            verified=after.get("eway_status") == "renewal_requested",
+            action="release_payment_hold",
+            before={"payment_received": before.get("payment_received")},
+            after={"payment_received": after.get("payment_received")},
+            verified=after.get("payment_received") == 1,
         )
+    
+    # Inventory count correction
+    elif culprit == "h_inventory_count_error":
+        before = eq.query_tally(order_id)
+        conn = sqlite3.connect(DB_DIR / "tally_erp.db")
+        try:
+            conn.execute(
+                "UPDATE orders SET stock_booked = 1 WHERE order_id = ?",
+                (order_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        after = eq.query_tally(order_id)
+        execution = ExecutionResult(
+            action="correct_cycle_count",
+            before={"stock_booked": before.get("stock_booked")},
+            after={"stock_booked": after.get("stock_booked")},
+            verified=after.get("stock_booked") == 1,
+        )
+    
+    # Invoice correction (credit note)
+    elif culprit == "h_invoice_amount_mismatch":
+        before = eq.query_tally(order_id)
+        conn = sqlite3.connect(DB_DIR / "tally_erp.db")
+        try:
+            conn.execute(
+                "UPDATE orders SET invoice_amount = po_amount WHERE order_id = ?",
+                (order_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        after = eq.query_tally(order_id)
+        execution = ExecutionResult(
+            action="issue_credit_note",
+            before={"invoice_amount": before.get("invoice_amount"), "po_amount": before.get("po_amount")},
+            after={"invoice_amount": after.get("invoice_amount"), "po_amount": after.get("po_amount")},
+            verified=after.get("invoice_amount") == after.get("po_amount"),
+        )
+    
+    # Compliance license renewal
+    elif culprit == "h_compliance_license_expired":
+        before = eq.query_transport(order_id)
+        conn = sqlite3.connect(DB_DIR / "transport.db")
+        try:
+            conn.execute(
+                "UPDATE bookings SET license_expired = 0, status = 'in_transit' WHERE order_id = ?",
+                (order_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        after = eq.query_transport(order_id)
+        execution = ExecutionResult(
+            action="renew_transport_license",
+            before={"license_expired": before.get("license_expired"), "status": before.get("status")},
+            after={"license_expired": after.get("license_expired"), "status": after.get("status")},
+            verified=after.get("license_expired") == 0,
+        )
+    
     else:
         execution = ExecutionResult(action="none", verified=False)
+    
     _emit({"event": "execution_done", "execution": execution.model_dump()})
     return {
         "execution": execution,

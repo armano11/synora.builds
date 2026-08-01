@@ -68,7 +68,9 @@ def _register_case(case: CasePayload, status: str = "active") -> dict:
 # ---------------------------------------------------------------------------
 
 class InvestigateRequest(BaseModel):
-    order_id: str
+    order_id: str | None = None
+    case_type: str | None = None
+    symptom: str | None = None
 
 class ApproveRequest(BaseModel):
     approved: bool
@@ -79,11 +81,20 @@ class ApproveRequest(BaseModel):
 
 @app.post("/api/investigate")
 async def api_investigate(req: InvestigateRequest):
-    case_id = f"manual-{req.order_id}-{uuid4().hex[:8]}"
+    # Case-type-based injection
+    from ingest.inject_email import CASE_SYMPTOMS, CASE_ORDERS
+    if req.case_type and req.case_type in CASE_SYMPTOMS:
+        order_id = req.order_id or CASE_ORDERS.get(req.case_type, "402")
+        symptom = req.symptom or CASE_SYMPTOMS[req.case_type]
+    else:
+        order_id = req.order_id or "402"
+        symptom = req.symptom or "shipment stuck"
+    
+    case_id = f"manual-{order_id}-{uuid4().hex[:8]}"
     case = CasePayload(
         case_id=case_id,
-        order_id=req.order_id,
-        symptom="shipment stuck",
+        order_id=order_id,
+        symptom=symptom,
         source="manual",
     )
     _register_case(case)

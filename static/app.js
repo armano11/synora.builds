@@ -118,6 +118,17 @@ function setPhase(phase) {
   const text = document.getElementById('phase-text');
   text.textContent = phase;
   pill.className = 'phase-pill phase-' + phase.toLowerCase().replace(/\s+/g, '');
+
+  // Update timeline bar
+  const phases = ['INGESTING', 'INVESTIGATING', 'CHALLENGING', 'AWAITINGAPPROVAL', 'EXECUTING', 'CLOSED'];
+  const currentIdx = phases.indexOf(phase.replace(/\s/g, ''));
+  document.querySelectorAll('.tl-step').forEach(el => {
+    const stepPhase = el.dataset.phase;
+    const stepIdx = phases.indexOf(stepPhase);
+    el.classList.remove('active', 'done');
+    if (stepIdx < currentIdx) el.classList.add('done');
+    else if (stepIdx === currentIdx) el.classList.add('active');
+  });
 }
 
 // ─── SSE Connection ───────────────────────────────────────────────────────

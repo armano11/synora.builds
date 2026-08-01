@@ -118,7 +118,7 @@ async def api_investigate_pending(case_id: str):
     case = CasePayload(
         case_id=case_id,
         order_id=pending["order_id"],
-        symptom="shipment stuck",
+        symptom="operations issue reported",
         source="cli" if case_id.startswith("cli-") else "email",
     )
     _register_case(case)

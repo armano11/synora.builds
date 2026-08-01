@@ -559,7 +559,7 @@ async def test_poll_callbacks_investigate_flow_and_offset_advance(monkeypatch):
                 ]
             return []
 
-        async def answer_callback_query(self, callback_query_id):
+        async def answer_callback_query(self, callback_query_id, text=None):
             seen["answered"] = callback_query_id
 
         async def edit_message_text(self, text, message_id=None, chat_id=None):
@@ -579,9 +579,7 @@ async def test_poll_callbacks_investigate_flow_and_offset_advance(monkeypatch):
 
     assert seen["token"] == "123456:fake-token"
     assert seen["answered"] == "cq-1"
-    assert "Investigating" in seen["edited"][0] or "investigating" in seen["edited"][0].lower()
-    assert seen["edited"][1] == 42
-    assert seen["edited"][2] == 98765
+    # edit_message_text removed — messages stay visible
     assert seen["case"] == "email-402-abc12345"
     assert seen["offsets"][0] == 0
     assert seen["offsets"][1] == 6, "offset must advance past the batch max id"

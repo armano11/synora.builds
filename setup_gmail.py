@@ -20,6 +20,7 @@ load_dotenv()
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/gmail.send",
 ]
 
 # Respect GMAIL_CREDENTIALS_PATH from .env

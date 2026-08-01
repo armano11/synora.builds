@@ -104,7 +104,7 @@ async def router_node(state: InvestigationState) -> dict:
     if not case_type or case_type not in playbook:
         s = (case.symptom or "").lower()
         if "stuck" in s or "delay" in s or "hubli" in s or "eway" in s:
-            case_type = "shipment_delay"
+            case_type = "payment_hold"
         elif "payment" in s or "bank" in s or "held" in s or "legal" in s:
             case_type = "payment_hold"
         elif "stock" in s or "inventory" in s or "mismatch" in s or "count" in s:
@@ -116,7 +116,7 @@ async def router_node(state: InvestigationState) -> dict:
         elif "license" in s or "grounded" in s or "compliance" in s:
             case_type = "compliance_block"
         else:
-            order_map = {"402": "shipment_delay", "501": "payment_hold", "502": "inventory_mismatch", "503": "customs_block", "504": "invoice_dispute", "505": "compliance_block"}
+            order_map = {"402": "payment_hold", "501": "payment_hold", "502": "inventory_mismatch", "503": "customs_block", "504": "invoice_dispute", "505": "compliance_block"}
             case_type = order_map.get(str(case.order_id), "payment_hold")
 
     hypotheses = hypotheses_for(case_type)
@@ -188,9 +188,7 @@ _INVESTIGATOR_FACTORIES = {
 }
 
 # Extra cross-check investigators (like delhivery for dispatch_failure)
-_EXTRA_CHECK: dict[str, str] = {
-    "h_dispatch_failure": "investigator_delhivery",
-}
+_EXTRA_CHECK: dict[str, str] = {}
 
 # Pre-built nodes for the graph (one per investigator type)
 _WIRED: dict[str, str] = {
@@ -241,7 +239,7 @@ def fan_out(state: InvestigationState) -> list[Send]:
             sends.append(Send(node_name, {
                 "case": state["case"],
                 "hypothesis": h,
-                "case_type": state.get("case_type", "shipment_delay"),
+                "case_type": state.get("case_type", "payment_hold"),
             }))
         # Extra cross-checks
         extra = _EXTRA_CHECK.get(h.id)
@@ -249,7 +247,7 @@ def fan_out(state: InvestigationState) -> list[Send]:
             sends.append(Send(extra, {
                 "case": state["case"],
                 "hypothesis": h,
-                "case_type": state.get("case_type", "shipment_delay"),
+                "case_type": state.get("case_type", "payment_hold"),
             }))
     if not sends:
         sends.append(Send("synthesizer", {k: state.get(k) for k in _SYNTH_KEYS}))
@@ -430,7 +428,7 @@ def _culprit_id(evidence: list[Evidence], hypothesis_ids: list[str]) -> str | No
 
 def synthesizer_node(state: InvestigationState) -> dict:
     """Deterministic: culprit, confidence (exact TRD §5 formula), stamps."""
-    case_type = state.get("case_type") or "shipment_delay"
+    case_type = state.get("case_type") or "payment_hold"
     hypotheses = state["hypotheses"] or hypotheses_for(case_type)
     evidence = state["evidence"]
     hypothesis_ids = [h.id for h in hypotheses]
@@ -604,7 +602,7 @@ def executor_node(state: InvestigationState) -> dict:
     culprit = state["verdict"].root_cause.rsplit(".", 1)[-1]
     order_id = case.order_id
     
-    # E-way bill renewal (shipment_delay, customs_block)
+    # E-way bill renewal (customs_block)
     if culprit in ("h_eway_bill_expired", "h_customs_docs_incomplete"):
         before = eq.query_gst(order_id)
         conn = sqlite3.connect(DB_DIR / "gst_portal.db")

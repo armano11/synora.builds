@@ -4,47 +4,6 @@
 # This file is the answer to "why not just a chatbot?".
 
 case_types:
-  shipment_delay:
-    triggers: ["shipment stuck", "order late", "no tracking", "vehicle breakdown"]
-    hypotheses:
-      - id: h_eway_bill_expired
-        label: "E-way bill expired"
-        investigator: gst
-        check: {db: gst_portal, table: eway_bills, key: order_id}
-        eliminates_if_clean: [h_eway_bill_expired]
-      - id: h_inventory_damage
-        label: "Inventory damaged in staging"
-        investigator: inventory
-        check: {db: tally_erp, table: inventory, key: sku}
-        eliminates_if_clean: [h_inventory_damage]
-      - id: h_dispatch_failure
-        label: "Dispatch never happened"
-        investigator: warehouse
-        check: {db: tally_erp, table: orders, key: order_id}
-        eliminates_if_clean: [h_dispatch_failure]
-      - id: h_transport_breakdown
-        label: "Transport breakdown"
-        investigator: transport
-        check: {db: transport, table: bookings, key: order_id}
-        eliminates_if_clean: [h_transport_breakdown]
-    portal_stamp_rules:
-      tally:
-        if: "order_status=Dispatched and transport_booking=none"
-        stamp: "STALE"
-        reason: "order status != shipment status"
-      transport:
-        if: "breakdown_claimed and eway_bill=expired"
-        stamp: "MISLEADING"
-        reason: "breakdown is excuse — waiting for e-way bill renewal"
-      gst:
-        if: "eway_bill=expired"
-        stamp: "TRUE"
-        reason: "validity lapsed, can't cross border"
-      delhivery:
-        if: "last_scan_age_days > 3"
-        stamp: "STALE"
-        reason: "last scan 6 days old"
-
   payment_hold:
     triggers: ["payment held", "cheque returned", "no payment received", "bank hold"]
     hypotheses:

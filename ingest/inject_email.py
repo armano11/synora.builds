@@ -33,7 +33,6 @@ DEFAULTS = {
 
 # Per-case-type demo symptoms for multi-case injection
 CASE_SYMPTOMS = {
-    "shipment_delay": "shipment stuck at Hubli for 6 days, buyer cancelling, Monday market deadline",
     "payment_hold": "payment held by bank for delivered order, buyer threatening legal action",
     "inventory_mismatch": "stock mismatch between system and physical count, order short by 10 units",
     "customs_block": "customs hold at Mumbai port, documents incomplete, clearance stuck 5 days",
@@ -43,7 +42,6 @@ CASE_SYMPTOMS = {
 
 # Map case types to their anchor order IDs
 CASE_ORDERS = {
-    "shipment_delay": "402",
     "payment_hold": "501",
     "inventory_mismatch": "502",
     "customs_block": "503",

@@ -332,13 +332,7 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
                 if data.startswith("investigate:"):
                     case_id = data.split(":", 1)[1]
                     try:
-                        await bot.answer_callback_query(callback_query_id=cb.id)
-                        await bot.edit_message_text(
-                            f"🔍 Investigating case {case_id}...\n"
-                            f"Watch live on the dashboard: http://localhost:8000",
-                            message_id=cb.message.message_id,
-                            chat_id=cb.message.chat.id,
-                        )
+                        await bot.answer_callback_query(callback_query_id=cb.id, text="🔍 Investigation started — watch the dashboard")
                         await on_investigate(case_id)
                     except Exception as exc:
                         _log_callback_failure(f"investigate {case_id} failed: {exc}")
@@ -347,13 +341,7 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
                 elif data.startswith("approve:"):
                     case_id = data.split(":", 1)[1]
                     try:
-                        await bot.answer_callback_query(callback_query_id=cb.id)
-                        await bot.edit_message_text(
-                            f"✅ Approved — executing fix for {case_id}...\n"
-                            f"Watch live on dashboard.",
-                            message_id=cb.message.message_id,
-                            chat_id=cb.message.chat.id,
-                        )
+                        await bot.answer_callback_query(callback_query_id=cb.id, text="✅ Approved — executing fix")
                         await on_investigate(case_id, is_approval=True, approved=True)
                     except Exception as exc:
                         _log_callback_failure(f"approve {case_id} failed: {exc}")
@@ -362,12 +350,7 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
                 elif data.startswith("reject:"):
                     case_id = data.split(":", 1)[1]
                     try:
-                        await bot.answer_callback_query(callback_query_id=cb.id)
-                        await bot.edit_message_text(
-                            f"❌ Rejected — closing case {case_id} without execution.",
-                            message_id=cb.message.message_id,
-                            chat_id=cb.message.chat.id,
-                        )
+                        await bot.answer_callback_query(callback_query_id=cb.id, text="❌ Rejected — closing case")
                         await on_investigate(case_id, is_approval=True, approved=False)
                     except Exception as exc:
                         _log_callback_failure(f"reject {case_id} failed: {exc}")
@@ -378,12 +361,7 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
                     case_id = parts[1] if len(parts) > 1 else "?"
                     draft_id = parts[2] if len(parts) > 2 else ""
                     try:
-                        await bot.answer_callback_query(callback_query_id=cb.id)
-                        await bot.edit_message_text(
-                            f"📧 Sending draft email for case {case_id}...",
-                            message_id=cb.message.message_id,
-                            chat_id=cb.message.chat.id,
-                        )
+                        await bot.answer_callback_query(callback_query_id=cb.id, text="📧 Sending email...")
                         result = await send_gmail_draft(draft_id)
                         if result.status == "sent":
                             chat_id = cb.message.chat.id

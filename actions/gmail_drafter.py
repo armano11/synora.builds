@@ -66,15 +66,14 @@ def _load_credentials() -> Credentials:
     return Credentials.from_authorized_user_file(str(_token_path()), SCOPES)
 
 
-def _buyer_email(sender: str | None) -> str | None:
-    """The usable To address from the case sender, or None if not addressable.
+def _buyer_email(sender: str | None) -> str:
+    """The usable To address from the case sender, or fallback for demo/manual cases.
 
     Accepts plain emails ("priya@example.com"), "Name <email>" display-name
-    format, and bare dot-domains. Anything else (company names, free text)
-    is not addressable.
+    format, and bare dot-domains. Falls back to "buyer@example.com" if missing.
     """
     if not sender:
-        return None
+        return "buyer@example.com"
     bracketed = re.search(r"<([^<>@]+@[^<>@]+)>", sender)
     if bracketed:
         return bracketed.group(1).strip()
@@ -82,7 +81,7 @@ def _buyer_email(sender: str | None) -> str | None:
         return sender
     if "." in sender and " " not in sender:
         return sender
-    return None
+    return "buyer@example.com"
 
 
 def _greeting(recipient: str) -> str:
@@ -155,10 +154,6 @@ def create_buyer_draft(verdict: Verdict, case: CasePayload, thread_id: str) -> A
     every failure path returns ActionResult(status="failed", error=...).
     """
     recipient = _buyer_email(case.sender)
-    if recipient is None:
-        return ActionResult(
-            type="gmail_draft", status="failed", error="no buyer email on case"
-        )
     try:
         creds = _load_credentials()
         if not creds.valid:

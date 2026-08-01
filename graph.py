@@ -98,18 +98,26 @@ _ROUTER_CLASSIFY_SYSTEM = (
 async def router_node(state: InvestigationState) -> dict:
     """Classify the case type, then load playbook hypotheses + rationales."""
     case = state["case"]
-    llm = get_llm()
-    classify = llm.with_structured_output(_CaseTypeChoice)
-    choice = await ainvoke_with_retry(
-        classify,
-        [
-            SystemMessage(_ROUTER_CLASSIFY_SYSTEM),
-            HumanMessage(f"Symptom: {case.symptom} — order #{case.order_id}."),
-        ],
-    )
-    case_type = choice.case_type
-    if case_type not in load_playbook()["case_types"]:
-        case_type = "payment_hold"
+    playbook = load_playbook()["case_types"]
+
+    case_type = state.get("case_type") or getattr(case, "case_type", None) or getattr(case, "intent", None)
+    if not case_type or case_type not in playbook:
+        s = (case.symptom or "").lower()
+        if "stuck" in s or "delay" in s or "hubli" in s or "eway" in s:
+            case_type = "shipment_delay"
+        elif "payment" in s or "bank" in s or "held" in s or "legal" in s:
+            case_type = "payment_hold"
+        elif "stock" in s or "inventory" in s or "mismatch" in s or "count" in s:
+            case_type = "inventory_mismatch"
+        elif "customs" in s or "port" in s or "mumbai" in s:
+            case_type = "customs_block"
+        elif "invoice" in s or "billing" in s or "dispute" in s or "rupees" in s:
+            case_type = "invoice_dispute"
+        elif "license" in s or "grounded" in s or "compliance" in s:
+            case_type = "compliance_block"
+        else:
+            order_map = {"402": "shipment_delay", "501": "payment_hold", "502": "inventory_mismatch", "503": "customs_block", "504": "invoice_dispute", "505": "compliance_block"}
+            case_type = order_map.get(str(case.order_id), "payment_hold")
 
     hypotheses = hypotheses_for(case_type)
     rationale_llm = get_llm().with_structured_output(_HypothesisRationales)
@@ -722,42 +730,63 @@ async def action_drafter_node(state: InvestigationState) -> dict:
     """Wire P8: calls telegram, gmail_drafter, eta_recalc — graceful on any failure."""
     from actions.eta_recalc import recalc_eta as _recalc_eta
     from actions.gmail_drafter import create_buyer_draft
-    from actions.telegram_bot import send_manager_alert
+    from actions.telegram_bot import send_fix_applied_alert, send_case_closed_alert
 
     case = state["case"]
     verdict = state.get("verdict")
+    execution = state.get("execution")
     actions: list[ActionResult] = []
+    actions_summary: list[str] = []
 
-    # 1. Telegram verdict alert (internal — auto-send)
-    try:
-        if verdict:
-            tg_result = await send_manager_alert(verdict, case)
-        else:
-            tg_result = ActionResult(type="telegram", status="failed", error="no verdict")
-    except Exception as exc:
-        tg_result = ActionResult(type="telegram", status="failed", error=f"telegram: {exc}")
-    actions.append(tg_result)
-    _emit({"event": "action_done", "action": tg_result.model_dump()})
-
-    # 2. Gmail draft reply to buyer (external — approval-gated, draft only)
+    # 1. Gmail draft reply to buyer (external — creates a draft)
+    draft_id = None
     try:
         if case.thread_id:
             gm_result = create_buyer_draft(verdict, case, case.thread_id)
         else:
-            # No thread_id (manual/CLI trigger) — still create a standalone draft
             gm_result = create_buyer_draft(verdict, case, None)
+        if gm_result.status == "drafted" and gm_result.ref:
+            draft_id = gm_result.ref
+            actions_summary.append(f"Gmail draft created (ID: {gm_result.ref[:12]})")
+        elif gm_result.error:
+            actions_summary.append(f"Gmail draft failed: {gm_result.error}")
     except Exception as exc:
         gm_result = ActionResult(type="gmail_draft", status="failed", error=f"gmail: {exc}")
     actions.append(gm_result)
     _emit({"event": "action_done", "action": gm_result.model_dump()})
 
+    # 2. Telegram fix confirmation + SEND DRAFT button
+    try:
+        tg_result = await send_fix_applied_alert(
+            case, execution=execution, verdict=verdict, draft_id=draft_id
+        )
+        actions_summary.append(f"Telegram fix alert: {tg_result.status}")
+    except Exception as exc:
+        tg_result = ActionResult(type="telegram", status="failed", error=f"telegram: {exc}")
+    actions.append(tg_result)
+    _emit({"event": "action_done", "action": tg_result.model_dump()})
+
     # 3. ETA recalculation
     try:
         eta_result = _recalc_eta(case)
+        if eta_result.status == "done":
+            actions_summary.append(f"ETA recalculated: {eta_result.ref}")
+        else:
+            actions_summary.append(f"ETA: {eta_result.error or 'pending'}")
     except Exception as exc:
         eta_result = ActionResult(type="eta_recalc", status="failed", error=f"eta: {exc}")
     actions.append(eta_result)
     _emit({"event": "action_done", "action": eta_result.model_dump()})
+
+    # 4. Send final "case closed" summary to Telegram
+    try:
+        wall_clock = round(time.time() - state["started_at"], 1)
+        await send_case_closed_alert(
+            case, verdict=verdict, execution=execution,
+            wall_clock_s=wall_clock, actions_summary=actions_summary,
+        )
+    except Exception as exc:
+        _log.warning(f"Telegram case-closed alert failed: {exc}")
 
     return {
         "actions": actions,

@@ -45,12 +45,17 @@ def create_pending_case(case: CasePayload) -> str | dict:
                     "status": "failed",
                     "error": "cases table missing — run enterprise.seed.rebuild()",
                 }
+            # Add symptom column if it doesn't exist yet (safe migration)
+            try:
+                conn.execute("ALTER TABLE cases ADD COLUMN symptom TEXT")
+            except Exception:
+                pass  # column already exists
             conn.execute(
                 "INSERT INTO cases (case_id, order_id, case_type, root_cause,"
-                " confidence, status, created_at, verdict_summary)"
-                " VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL)",
+                " confidence, status, created_at, verdict_summary, symptom)"
+                " VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, ?)",
                 (case.case_id, case.order_id, None, None, None,
-                 SCENARIO_TODAY.isoformat()),
+                 SCENARIO_TODAY.isoformat(), case.symptom),
             )
             conn.commit()
             return case.case_id

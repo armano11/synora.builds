@@ -69,6 +69,44 @@ async def test_e2e_402_approved_full_loop():
         seed.rebuild()
 
 
+
+async def test_e2e_501_payment_hold_full_loop():
+    try:
+        case_501 = CasePayload(
+            case_id="e2e-501",
+            order_id="501",
+            symptom="payment held by bank for delivered order, buyer threatening legal action",
+            source="email",
+        )
+        phase1 = await _run(case_501)
+        names = [ev["event"] for ev in phase1]
+
+        assert "case_ingested" in names
+        assert names.index("hypotheses_ready") < names.index("evidence_found")
+        assert "portal_stamped" in names
+        assert "challenge_result" in names
+        assert "verdict_locked" in names
+
+        verdict = next(ev["verdict"] for ev in phase1 if ev["event"] == "verdict_locked")
+        assert "h_payment_hold_bank_recon" in verdict["root_cause"]
+        assert verdict["confidence"] >= 0.9  # 0.85 + 0.06 challenge bonus = 0.91
+        assert phase1[-1]["event"] == "approval_required"
+
+        phase2 = await _run(case_501, resume={"approved": True})
+        names2 = [ev["event"] for ev in phase2]
+        assert "execution_done" in names2
+        execution = next(ev["execution"] for ev in phase2 if ev["event"] == "execution_done")
+        assert execution["verified"] is True
+        assert execution["after"]["payment_received"] == 1
+        assert "case_closed" in names2
+        assert "action_done" in names2
+
+        # Ground truth really changed (verified by re-read)
+        assert eq.query_tally("501")["payment_received"] == 1
+    finally:
+        seed.rebuild()
+
+
 async def test_e2e_402_rejected_skips_executor():
     try:
         phase1 = await _run(CASE_402)

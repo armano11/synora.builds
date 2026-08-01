@@ -10,16 +10,26 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import os
+from dotenv import load_dotenv
 
 from google_auth_oauthlib.flow import InstalledAppFlow
+
+load_dotenv()
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.compose",
 ]
 
-CREDENTIALS_PATH = Path(__file__).resolve().parent / "credentials.json"
-TOKEN_PATH = Path(__file__).resolve().parent / "token.json"
+# Respect GMAIL_CREDENTIALS_PATH from .env
+env_creds_path = os.environ.get("GMAIL_CREDENTIALS_PATH")
+if env_creds_path:
+    CREDENTIALS_PATH = Path(env_creds_path).resolve()
+else:
+    CREDENTIALS_PATH = Path(__file__).resolve().parent / "credentials.json"
+
+TOKEN_PATH = CREDENTIALS_PATH.parent / "token.json"
 
 
 def main() -> int:

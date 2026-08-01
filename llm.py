@@ -107,7 +107,7 @@ def _get_semaphore() -> asyncio.Semaphore:
     except RuntimeError:
         loop_id = 0
     if _LLM_SEMAPHORE is None or _LLM_SEMAPHORE_LOOP_ID != loop_id:
-        _LLM_SEMAPHORE = asyncio.Semaphore(4)
+        _LLM_SEMAPHORE = asyncio.Semaphore(6)
         _LLM_SEMAPHORE_LOOP_ID = loop_id
     return _LLM_SEMAPHORE
 
@@ -115,10 +115,10 @@ def _get_semaphore() -> asyncio.Semaphore:
 # congested provider — a hung call would otherwise stall the graph forever
 # (NIM free tier: 40-60s common, multi-minute hangs under load). An asyncio
 # backstop converts hangs into retries with visible progress.
-_CALL_TIMEOUT_S = 120.0
+_CALL_TIMEOUT_S = 30.0
 
 
-async def ainvoke_with_retry(runnable, messages: list, attempts: int = 5, backoff_s: float = 1.5):
+async def ainvoke_with_retry(runnable, messages: list, attempts: int = 3, backoff_s: float = 0.5):
     """Async invoke with exponential backoff on transient failures.
 
     Transient = hangs, 429/529 overloaded, 5xx, connection errors.

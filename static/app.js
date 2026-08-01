@@ -504,6 +504,12 @@ function onActionDone(p) {
   const item = document.createElement('div');
   const statusColor = action.status === 'sent' ? '#22c55e' : action.status === 'drafted' ? '#f5a623' : action.status === 'done' ? '#22c55e' : '#ef4444';
   const icon = action.type === 'telegram' ? '📨' : action.type === 'gmail_draft' ? '✉' : '⏱';
+  
+  let sendBtnHtml = '';
+  if (action.type === 'gmail_draft' && action.status === 'drafted' && action.ref) {
+    sendBtnHtml = `<button data-draft-id="${escHtml(action.ref)}" class="send-email-draft-btn font-mono text-[10px] bg-[#f5a623]/20 border border-[#f5a623]/50 text-[#f5a623] px-2 py-0.5 rounded hover:bg-[#f5a623]/30 transition-all cursor-pointer ml-auto">📧 SEND DRAFT EMAIL</button>`;
+  }
+
   item.className = 'flex items-center gap-2 font-mono text-[11px]';
   item.innerHTML = `
     <span class="text-white/30">${icon}</span>
@@ -511,8 +517,37 @@ function onActionDone(p) {
     <span style="color:${statusColor}">${escHtml(action.status)}</span>
     ${action.ref ? `<span class="text-white/20 text-[10px]">ref: ${escHtml(String(action.ref).substring(0,20))}</span>` : ''}
     ${action.error ? `<span class="text-[#ef4444]/60 text-[10px]">${escHtml(action.error.substring(0,60))}</span>` : ''}
+    ${sendBtnHtml}
   `;
   list.appendChild(item);
+
+  const btn = item.querySelector('.send-email-draft-btn');
+  if (btn) {
+    btn.addEventListener('click', async () => {
+      const draftId = btn.getAttribute('data-draft-id');
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+      try {
+        const res = await fetch('/api/send_draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ draft_id: draftId })
+        });
+        const d = await res.json();
+        if (res.ok && d.status === 'sent') {
+          btn.className = 'font-mono text-[10px] bg-[#22c55e]/20 border border-[#22c55e]/50 text-[#22c55e] px-2 py-0.5 rounded ml-auto';
+          btn.textContent = '✓ EMAIL SENT';
+          toast('Email sent to buyer successfully! ✓', 'success');
+        } else {
+          btn.textContent = '❌ SEND FAILED';
+          toast(d.detail || 'Email send failed', 'error');
+        }
+      } catch (err) {
+        btn.textContent = '❌ ERROR';
+        toast('Failed to reach server', 'error');
+      }
+    });
+  }
 
   // Toast for important actions
   if (action.status === 'sent' && action.type === 'telegram') {
@@ -520,6 +555,9 @@ function onActionDone(p) {
   }
   if (action.status === 'done' && action.type === 'eta_recalc') {
     toast(`New ETA: ${action.ref}`, 'success');
+  }
+  if (action.status === 'drafted' && action.type === 'gmail_draft') {
+    toast('Gmail draft prepared for customer ✓', 'success');
   }
 
   addTrace('action', `${action.type}: ${action.status}`, 'tag-action');

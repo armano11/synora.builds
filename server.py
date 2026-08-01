@@ -166,6 +166,18 @@ async def api_stream(case_id: str):
         },
     )
 
+class SendDraftRequest(BaseModel):
+    draft_id: str
+
+@app.post("/api/send_draft")
+async def api_send_draft(req: SendDraftRequest):
+    from actions.telegram_bot import send_gmail_draft
+    result = await send_gmail_draft(req.draft_id)
+    if result.status == "sent":
+        return {"status": "sent", "ref": result.ref}
+    else:
+        raise HTTPException(400, f"Send email draft failed: {result.error}")
+
 # ---------------------------------------------------------------------------
 # POST /api/approve/{case_id} — resume the interrupt
 # ---------------------------------------------------------------------------
@@ -293,16 +305,8 @@ if STATIC_DIR.exists():
 # ---------------------------------------------------------------------------
 
 async def _run_investigation(case: CasePayload, resume: dict | None = None):
-    """Run the graph and push each SSE event to connected stream clients.
-
-    FIX: The None sentinel (SSE stream close) is sent:
-    - After case_closed in the initial run
-    - After case_closed in the resume run
-    - After any error
-    - NOT after approval_required (keeps stream open for the resume call)
-    """
+    """Run the graph and push each SSE event to connected stream clients."""
     case_id = case.case_id
-    queue = _streams.get(case_id)
     events: list[dict] = []
     last_event_name: str | None = None
 
@@ -312,8 +316,9 @@ async def _run_investigation(case: CasePayload, resume: dict | None = None):
             last_event_name = ev.get("event")
             if case_id in _cases:
                 _cases[case_id]["events"].append(ev)
-            if queue:
-                await queue.put(ev)
+            q = _streams.get(case_id)
+            if q:
+                await q.put(ev)
             if case_id in _cases:
                 if last_event_name == "case_closed":
                     _cases[case_id]["status"] = "closed"
@@ -323,14 +328,14 @@ async def _run_investigation(case: CasePayload, resume: dict | None = None):
         error_ev = {"event": "error", "where": "server", "message": str(exc), "degraded": True}
         events.append(error_ev)
         last_event_name = "error"
-        if queue:
-            await queue.put(error_ev)
+        q = _streams.get(case_id)
+        if q:
+            await q.put(error_ev)
         log.error(f"Investigation {case_id} failed: {exc}")
     finally:
-        # Send sentinel to close SSE — but NOT on approval_required
-        # (stream must stay open so the browser receives resume events)
-        if queue and last_event_name != "approval_required":
-            await queue.put(None)
+        q = _streams.get(case_id)
+        if q and last_event_name != "approval_required":
+            await q.put(None)
 
     # Save replay file (merge with existing on resume)
     try:
@@ -355,9 +360,9 @@ async def startup():
     log.info("ORBIT server started — http://localhost:8000")
 
 async def _start_gmail_poller():
-    """Background: poll Gmail for trigger emails → create pending cases + alert."""
+    """Background: poll Gmail for trigger emails -> create pending cases + alert."""
     try:
-        from actions.telegram_bot import send_alert
+        from actions.telegram_bot import send_initial_alert
         from ingest.gmail_poller import poll_inbox
         from ingest.pending import create_pending_case
 
@@ -365,7 +370,7 @@ async def _start_gmail_poller():
             result = create_pending_case(case)
             if isinstance(result, str):
                 log.info(f"Pending case created from email: {result}")
-                await send_alert(case)
+                await send_initial_alert(case)
             else:
                 log.warning(f"Pending case failed: {result}")
 
@@ -374,34 +379,61 @@ async def _start_gmail_poller():
         log.warning(f"Gmail poller disabled: {exc}")
 
 async def _start_telegram_poller():
-    """Background: poll Telegram for button presses → trigger/resume investigations."""
+    """Background: poll Telegram for button presses -> trigger/resume investigations."""
     try:
         from actions.telegram_bot import poll_callbacks
 
         async def on_callback(case_id: str, is_approval: bool = False, approved: bool = False):
             if is_approval:
                 # Approval/rejection from Telegram verdict alert
-                pending = get_pending_case(case_id)
-                if pending or case_id in _cases:
-                    case = CasePayload(
-                        case_id=case_id,
-                        order_id=_cases.get(case_id, {}).get("order_id", "unknown"),
-                        symptom="operations issue reported",
-                        source="email",
-                    )
-                    _register_case(case)
-                    await _run_investigation(case, resume={"approved": approved})
+                if case_id in _cases:
+                    _cases[case_id]["status"] = "active"
+                    order_id = _cases[case_id]["order_id"]
+                    symptom = _cases[case_id]["symptom"]
+                    source = _cases[case_id]["source"]
+                else:
+                    pending = get_pending_case(case_id)
+                    order_id = pending["order_id"] if pending else "unknown"
+                    symptom = pending.get("symptom", "operations issue") if pending else "operations issue"
+                    source = "email"
+                case = CasePayload(
+                    case_id=case_id,
+                    order_id=order_id,
+                    symptom=symptom,
+                    source=source,
+                )
+                await _run_investigation(case, resume={"approved": approved})
             else:
-                # INVESTIGATE button pressed
+                # INVESTIGATE button pressed — use real symptom from pending case
                 pending = get_pending_case(case_id)
                 if pending:
+                    order_id = pending["order_id"]
+                    # Get the real symptom from the case_id or order mapping
+                    from ingest.inject_email import CASE_SYMPTOMS, CASE_ORDERS
+                    symptom = pending.get("symptom")
+                    if not symptom:
+                        # Reverse lookup: order_id -> case_type -> symptom
+                        for ct, oid in CASE_ORDERS.items():
+                            if str(oid) == str(order_id):
+                                symptom = CASE_SYMPTOMS.get(ct, "operations issue reported")
+                                break
+                        else:
+                            symptom = "operations issue reported"
                     case = CasePayload(
                         case_id=case_id,
-                        order_id=pending["order_id"],
-                        symptom="operations issue reported",
+                        order_id=order_id,
+                        symptom=symptom,
                         source="email",
                     )
                     _register_case(case)
+                    await _run_investigation(case)
+                elif case_id in _cases:
+                    case = CasePayload(
+                        case_id=case_id,
+                        order_id=_cases[case_id]["order_id"],
+                        symptom=_cases[case_id]["symptom"],
+                        source=_cases[case_id]["source"],
+                    )
                     await _run_investigation(case)
                 else:
                     log.warning(f"Telegram investigate: case {case_id} not found")
@@ -409,3 +441,4 @@ async def _start_telegram_poller():
         await poll_callbacks(on_callback, interval=2)
     except Exception as exc:
         log.warning(f"Telegram poller disabled: {exc}")
+

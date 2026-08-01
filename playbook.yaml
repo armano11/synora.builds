@@ -31,7 +31,7 @@ case_types:
       tally:
         if: "order_status=Dispatched and transport_booking=none"
         stamp: "STALE"
-        reason: "order status ≠ shipment status"
+        reason: "order status != shipment status"
       transport:
         if: "breakdown_claimed and eway_bill=expired"
         stamp: "MISLEADING"

@@ -24,7 +24,7 @@ from contracts import CasePayload
 
 from ingest.intent_classifier import classify_email
 
-_ORDER_RE = re.compile(r"#(\d+)|order\s+(\d+)", re.IGNORECASE)
+_ORDER_RE = re.compile(r"#(\d+)|order(?:\s+no\.?|\s+number)?[\s:-]*(\d+)", re.IGNORECASE)
 
 
 async def parse_trigger_email(

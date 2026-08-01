@@ -157,7 +157,7 @@ async def router_node(state: InvestigationState) -> dict:
     eliminated = {
         hid for ev in state.get("evidence", []) for hid in ev.eliminates
     }
-    wired_ids = set(_WIRED) | set(_EXTRA_CHECK)
+    wired_ids = {h.id for h in hypotheses if h.investigator in _WIRED} | set(_EXTRA_CHECK)
     skipped = [
         f"> router: SKIPPED {h.id} — cause locked"
         for h in hypotheses
@@ -166,7 +166,7 @@ async def router_node(state: InvestigationState) -> dict:
     return {
         "case_type": case_type,
         "hypotheses": enriched,
-        "loop_count": state.get("loop_count", 0) + 1,
+        "loop_count": state.get("loop_count", 0) + (1 if state.get("evidence") else 0),
         "trace": [f"> router: case type={case_type}, {len(enriched)} hypotheses"] + skipped,
     }
 

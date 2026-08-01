@@ -9,9 +9,14 @@ Deterministic: hardcoded dates, no random, no now(). Idempotent rebuild.
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 DB_DIR = Path(__file__).resolve().parent / "dbs"
+
+# The fixture world's "today" — every relative fact (last_scan_age_days etc.)
+# is computed against this, never the wall clock (deterministic demo).
+SCENARIO_TODAY: date = date(2026, 7, 20)
 
 # ---------------------------------------------------------------------------
 # ground truth — order 402

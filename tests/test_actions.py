@@ -5,12 +5,16 @@ eta_recalc is unit-tested for the exact date; telegram/gmail are tested
 import-clean and on their failure paths with monkeypatched clients.
 """
 
+import asyncio
 import base64
 from types import SimpleNamespace
 
+import pytest
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
 from actions.eta_recalc import recalc_eta
 from actions.gmail_drafter import create_buyer_draft
-from actions.telegram_bot import send_manager_alert
+from actions.telegram_bot import poll_callbacks, send_alert, send_manager_alert
 from contracts import CasePayload, PortalStamp, Verdict
 from enterprise.seed import SCENARIO_TODAY
 
@@ -444,3 +448,141 @@ def test_eta_recalc_arithmetic_failure_returns_failed(monkeypatch):
     assert result.status == "failed"
     assert result.ref is None
     assert result.error
+
+
+# ---------------------------------------------------------------------------
+# P6.5 — send_alert + poll_callbacks (INVESTIGATE button flow)
+# ---------------------------------------------------------------------------
+
+
+ALERT_CASE = CasePayload(
+    case_id="email-402-abc12345", order_id="402",
+    symptom="shipment stuck", source="email",
+    sender="priya@example.com", intent="angry_customer",
+    urgency="high", summary="customer reports stuck order",
+)
+
+
+async def test_send_alert_missing_env_fails(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    result = await send_alert(ALERT_CASE)
+    assert result.type == "telegram"
+    assert result.status == "failed"
+    assert result.error
+
+
+async def test_send_alert_success_with_investigate_keyboard(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:fake-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "98765")
+    seen = {}
+
+    class FakeBot:
+        def __init__(self, token):
+            seen["token"] = token
+
+        async def send_message(self, chat_id, text, reply_markup=None):
+            seen["chat_id"] = chat_id
+            seen["text"] = text
+            seen["markup"] = reply_markup
+            return SimpleNamespace(message_id=777)
+
+    monkeypatch.setattr("actions.telegram_bot.Bot", FakeBot)
+    result = await send_alert(ALERT_CASE)
+    assert result.status == "sent"
+    assert result.ref == "777"
+    assert seen["token"] == "123456:fake-token"
+    assert seen["chat_id"] == "98765"
+    assert seen["text"] == (
+        "🚨 CUSTOMER ISSUE — Order #402\n"
+        "customer reports stuck order\n"
+        "Urgency: high"
+    )
+    assert isinstance(seen["markup"], InlineKeyboardMarkup)
+    row = seen["markup"].inline_keyboard[0]
+    assert isinstance(row[0], InlineKeyboardButton)
+    assert row[0].text == "🔍 INVESTIGATE"
+    assert row[0].callback_data == "investigate:email-402-abc12345"
+
+
+async def test_send_alert_send_error_returns_failed(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:fake-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "98765")
+
+    class BrokenBot:
+        def __init__(self, token):
+            pass
+
+        async def send_message(self, chat_id, text, reply_markup=None):
+            raise RuntimeError("telegram api down")
+
+    monkeypatch.setattr("actions.telegram_bot.Bot", BrokenBot)
+    result = await send_alert(ALERT_CASE)
+    assert result.status == "failed"
+    assert "telegram api down" in result.error
+
+
+async def test_poll_callbacks_missing_env_returns_failed(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+
+    async def on_investigate(case_id):
+        raise AssertionError("must not fire without a bot")
+
+    result = await poll_callbacks(on_investigate)
+    assert isinstance(result, dict)
+    assert result["status"] == "failed"
+
+
+async def test_poll_callbacks_investigate_flow_and_offset_advance(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:fake-token")
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    seen = {"offsets": [], "answered": None, "edited": None, "case": None}
+    invoked = asyncio.Event()
+
+    class FakeBot:
+        def __init__(self, token):
+            seen["token"] = token
+
+        async def get_updates(self, offset=None, timeout=None):
+            seen["offsets"].append(offset)
+            if offset == 0:
+                return [
+                    SimpleNamespace(update_id=4, callback_query=None),
+                    SimpleNamespace(
+                        update_id=5,
+                        callback_query=SimpleNamespace(
+                            data="investigate:email-402-abc12345",
+                            id="cq-1",
+                            message=SimpleNamespace(
+                                message_id=42, chat=SimpleNamespace(id=98765)
+                            ),
+                        ),
+                    ),
+                ]
+            return []
+
+        async def answer_callback_query(self, callback_query_id):
+            seen["answered"] = callback_query_id
+
+        async def edit_message_text(self, text, message_id=None, chat_id=None):
+            seen["edited"] = (text, message_id, chat_id)
+
+    async def on_investigate(case_id):
+        seen["case"] = case_id
+        invoked.set()
+
+    monkeypatch.setattr("actions.telegram_bot.Bot", FakeBot)
+    task = asyncio.create_task(poll_callbacks(on_investigate, interval=0))
+    await asyncio.wait_for(invoked.wait(), timeout=5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert seen["token"] == "123456:fake-token"
+    assert seen["answered"] == "cq-1"
+    assert seen["edited"] == ("🔍 Investigation started — watch the console", 42, 98765)
+    assert seen["case"] == "email-402-abc12345"
+    assert seen["offsets"][0] == 0
+    assert seen["offsets"][1] == 6, "offset must advance past the batch max id"
+
+# ---------------------------------------------------------------------------

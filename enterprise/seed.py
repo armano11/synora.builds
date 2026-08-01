@@ -26,7 +26,8 @@ TALLY_ORDER_ITEMS = [
 ]
 
 TALLY_INVENTORY = [
-    ("COT-1000", "Cotton sheeting 40s", 12, "Mangaluru DC"),
+    # picked=1 → goods picked & loaded for dispatch (low stock is expected, not damage)
+    ("COT-1000", "Cotton sheeting 40s", 12, "Mangaluru DC", 1),
 ]
 
 GST_EWAY_BILLS = [
@@ -76,11 +77,11 @@ FILLER_ITEMS = [
 ]
 
 FILLER_INVENTORY = [
-    ("COT-2000", "Cotton sheeting 60s", 240, "Hubli DC"),
-    ("POL-3000", "Polyester twill", 90, "Mangaluru DC"),
-    ("SIL-4000", "Silk blend", 35, "Bengaluru DC"),
-    ("LIN-5000", "Linen voile", 118, "Mangaluru DC"),
-    ("DEN-6000", "Denim 12oz", 260, "Hubli DC"),
+    ("COT-2000", "Cotton sheeting 60s", 240, "Hubli DC", 0),
+    ("POL-3000", "Polyester twill", 90, "Mangaluru DC", 1),
+    ("SIL-4000", "Silk blend", 35, "Bengaluru DC", 0),
+    ("LIN-5000", "Linen voile", 118, "Mangaluru DC", 0),
+    ("DEN-6000", "Denim 12oz", 260, "Hubli DC", 0),
 ]
 
 FILLER_GST = [
@@ -169,7 +170,8 @@ def rebuild() -> None:
             " status TEXT, dispatch_date TEXT, transport_booking TEXT, amount REAL)",
             "CREATE TABLE order_items (order_id TEXT, sku TEXT, qty INTEGER, unit_price REAL,"
             " PRIMARY KEY (order_id, sku))",
-            "CREATE TABLE inventory (sku TEXT PRIMARY KEY, name TEXT, stock INTEGER, warehouse TEXT)",
+            "CREATE TABLE inventory (sku TEXT PRIMARY KEY, name TEXT, stock INTEGER,"
+            " warehouse TEXT, picked INTEGER)",
         ],
         {
             "orders": TALLY_ORDERS + FILLER_ORDERS,

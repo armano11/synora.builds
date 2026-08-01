@@ -36,7 +36,7 @@ def query_tally(order_id: str) -> dict:
         conn = sqlite3.connect(DB_DIR / "tally_erp.db")
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT oi.sku, oi.qty, oi.unit_price, i.stock, i.name"
+            "SELECT oi.sku, oi.qty, oi.unit_price, i.stock, i.name, i.picked"
             " FROM order_items oi LEFT JOIN inventory i ON oi.sku = i.sku"
             " WHERE oi.order_id = ?",
             (order_id,),

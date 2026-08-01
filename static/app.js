@@ -307,7 +307,7 @@ function onInvestigatorStart(p) {
   const portalId = INV_PORTAL[p.investigator];
   if (portalId) {
     const el = document.getElementById(portalId);
-    if (el) { el.classList.add('ring-1','ring-blue-500/40'); setTimeout(() => el.classList.remove('ring-1','ring-blue-500/40'), 2500); }
+    if (el) { el.classList.add('active'); setTimeout(() => el.classList.remove('active'), 2500); }
   }
   const hypoEl = document.getElementById(`hypo-${p.hypothesis_id}`);
   if (hypoEl) hypoEl.classList.add('investigating');
@@ -698,23 +698,41 @@ async function loadCases() {
   try {
     const r = await fetch('/api/cases');
     const d = await r.json();
-    const cases = d.cases || [];
-    renderCases(cases);
+    renderCases(d.cases || []);
 
-    // Auto-connect to active/awaiting/recent case if not currently streaming
-    const targetCase = cases.find(c => c.status === 'active' || c.status === 'awaiting_approval') || (!state.activeCaseId ? cases[0] : null);
-    if (targetCase && (!state.eventSource || targetCase.status === 'active' || targetCase.status === 'awaiting_approval') && targetCase.case_id !== state.activeCaseId) {
-      startCase(targetCase.case_id);
+    // Auto-connect to active/awaiting case if not already streaming
+    const active = (d.cases || []).find(c => c.status === 'active' || c.status === 'awaiting_approval');
+    if (active && !state.eventSource && active.case_id !== state.activeCaseId) {
+      toast('Connecting to live investigation…', 'info');
+      startCase(active.case_id);
     }
 
     // Pending cases
-    const pending = cases.filter(c => c.status === 'pending');
+    const pending = (d.cases || []).filter(c => c.status === 'pending');
     if (pending.length > 0 && !state.activeCaseId) {
       showPendingBanner(pending[0]);
     } else if (pending.length === 0) {
       hidePendingBanner();
     }
   } catch {}
+}
+
+
+
+    const statusColor = c.status === 'closed' ? '#22c55e' : c.status === 'active' ? '#f5a623' : c.status === 'awaiting_approval' ? '#f5a623' : '#ffffff40';
+    const conf = c.confidence ? Math.round(c.confidence * 100) + '%' : '';
+    return `
+      <div class="case-item${isActive ? ' active-case' : '}" data-case-id="${escHtml(c.case_id)}" onclick="if('${c.status}'==='active'||'${c.status}'==='awaiting_approval'){state.activeCaseId='${escHtml(c.case_id)}';state.startTime=Date.now();connectSSE('${escHtml(c.case_id)}');}">
+        <div class="flex items-center gap-1.5">
+          <div class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${statusColor}"></div>
+          <span class="font-mono text-[10px] text-white/60 truncate">#${escHtml(c.order_id)}</span>
+          ${conf ? `<span class="font-mono text-[9px] text-white/25 ml-auto">${conf}</span>` : ''}
+        </div>
+        ${c.case_type ? `<div class="font-mono text-[9px] text-white/20 mt-0.5 ml-3">${escHtml(c.case_type.replace(/_/g,' '))}</div>` : ''}
+        ${c.verdict_summary ? `<div class="font-mono text-[9px] text-white/15 mt-0.5 ml-3 truncate">${escHtml(c.verdict_summary.substring(0,50))}</div>` : ''}
+      </div>
+    `;
+  }).join('');
 }
 
 function renderCases(cases) {
@@ -724,18 +742,21 @@ function renderCases(cases) {
     return;
   }
   list.innerHTML = cases.map(c => {
+    const isActive = c.case_id === state.activeCaseId;
     const statusColor = c.status === 'closed' ? '#22c55e' : c.status === 'active' ? '#f5a623' : c.status === 'awaiting_approval' ? '#f5a623' : '#ffffff40';
     const conf = c.confidence ? Math.round(c.confidence * 100) + '%' : '';
-    const isSelected = c.case_id === state.activeCaseId;
+    const clickHandler = (c.status === 'active' || c.status === 'awaiting_approval')
+      ? `startCase('${escHtml(c.case_id)}')`
+      : '';
     return `
-      <div class="case-item ${isSelected ? 'bg-white/[0.06] ring-1 ring-white/10' : ''}" data-case-id="${escHtml(c.case_id)}" onclick="startCase('${escHtml(c.case_id)}');">
+      <div class="case-item${isActive ? ' active-case' : ''}" data-case-id="${escHtml(c.case_id)}" ${clickHandler ? `onclick="${clickHandler}"` : ''}>
         <div class="flex items-center gap-1.5">
           <div class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${statusColor}"></div>
-          <span class="font-mono text-[10px] text-white/70 truncate font-medium">#${escHtml(c.order_id)}</span>
-          ${conf ? `<span class="font-mono text-[9px] text-white/30 ml-auto">${conf}</span>` : ''}
+          <span class="font-mono text-[10px] text-white/60 truncate">#${escHtml(c.order_id)}</span>
+          ${conf ? `<span class="font-mono text-[9px] text-white/25 ml-auto">${conf}</span>` : ''}
         </div>
-        ${c.case_type ? `<div class="font-mono text-[9px] text-white/30 mt-0.5 ml-3">${escHtml(c.case_type.replace(/_/g,' '))}</div>` : ''}
-        ${c.verdict_summary ? `<div class="font-mono text-[9px] text-white/20 mt-0.5 ml-3 truncate">${escHtml(c.verdict_summary.substring(0,40))}</div>` : ''}
+        ${c.case_type ? `<div class="font-mono text-[9px] text-white/20 mt-0.5 ml-3">${escHtml(c.case_type.replace(/_/g,' '))}</div>` : ''}
+        ${c.verdict_summary ? `<div class="font-mono text-[9px] text-white/15 mt-0.5 ml-3 truncate">${escHtml(c.verdict_summary.substring(0,50))}</div>` : ''}
       </div>
     `;
   }).join('');

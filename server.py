@@ -132,9 +132,12 @@ async def api_investigate_pending(case_id: str):
 
 @app.get("/api/stream/{case_id}")
 async def api_stream(case_id: str):
-    queue: asyncio.Queue = asyncio.Queue()
-    # FIX: direct assignment (no setdefault race)
-    _streams[case_id] = queue
+    # Use existing queue if investigation is already running, else create new
+    if case_id in _streams and not _streams[case_id].empty():
+        queue = _streams[case_id]
+    else:
+        queue = asyncio.Queue()
+        _streams[case_id] = queue
 
     # Replay already-seen events for this case (browser reconnect safety)
     if case_id in _cases:
@@ -402,7 +405,7 @@ async def _start_telegram_poller():
                     symptom=symptom,
                     source=source,
                 )
-                asyncio.create_task(_run_investigation(case, resume={"approved": approved}))
+                await _run_investigation(case, resume={"approved": approved})
             else:
                 # INVESTIGATE button pressed — use real symptom from pending case
                 pending = get_pending_case(case_id)
@@ -426,7 +429,7 @@ async def _start_telegram_poller():
                         source="email",
                     )
                     _register_case(case)
-                    asyncio.create_task(_run_investigation(case))
+                    await _run_investigation(case)
                 elif case_id in _cases:
                     case = CasePayload(
                         case_id=case_id,
@@ -434,7 +437,7 @@ async def _start_telegram_poller():
                         symptom=_cases[case_id]["symptom"],
                         source=_cases[case_id]["source"],
                     )
-                    asyncio.create_task(_run_investigation(case))
+                    await _run_investigation(case)
                 else:
                     log.warning(f"Telegram investigate: case {case_id} not found")
 

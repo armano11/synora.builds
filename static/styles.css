@@ -622,3 +622,150 @@
   font-size: 8px;
   color: rgba(255,255,255,0.08);
 }
+
+/* ═════════════════════════════ CREATIVE ELEMENTS ═════════════════════════════ */
+
+/* ─── Live indicator ─── */
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  color: #22c55e;
+}
+.live-indicator::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: pulse-green 1.5s infinite;
+}
+
+/* ─── Portal card glow when active ─── */
+.portal-card {
+  position: relative;
+  overflow: hidden;
+}
+.portal-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(245,166,35,0.5), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.6s ease;
+}
+.portal-card.active::after {
+  transform: translateX(100%);
+}
+
+/* ─── Verdict reveal animation ─── */
+@keyframes verdict-reveal {
+  0% { opacity: 0; transform: scale(0.95) translateY(10px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+#verdict-bar:not(.hidden) {
+  animation: verdict-reveal 0.4s ease;
+}
+
+/* ─── Execution result glow ─── */
+@keyframes exec-glow {
+  0%, 100% { box-shadow: 0 0 0 rgba(34,197,94,0); }
+  50% { box-shadow: 0 0 16px rgba(34,197,94,0.2); }
+}
+#execution-section:not(.hidden) {
+  animation: exec-glow 2s ease infinite;
+}
+
+/* ─── Approval gate pulse ─── */
+@keyframes approval-pulse {
+  0%, 100% { border-color: rgba(245,166,35,0.2); }
+  50% { border-color: rgba(245,166,35,0.5); }
+}
+#approval-gate:not(.hidden) {
+  animation: approval-pulse 2s ease infinite;
+}
+
+/* ─── Stamp badge pop ─── */
+@keyframes stamp-pop {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.stamp-badge:not(.hidden) {
+  animation: stamp-pop 0.3s ease;
+}
+
+/* ─── Evidence slide-in ─── */
+@keyframes evidence-slide {
+  0% { opacity: 0; transform: translateX(-10px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+.evidence-item {
+  animation: evidence-slide 0.3s ease;
+}
+
+/* ─── Confidence bar shimmer ─── */
+@keyframes confidence-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+#confidence-bar {
+  background-image: linear-gradient(
+    90deg,
+    #f5a623 0%,
+    #ffb84d 50%,
+    #f5a623 100%
+  );
+  background-size: 200% 100%;
+  animation: confidence-shimmer 2s linear infinite;
+}
+
+/* ─── String line draw animation ─── */
+@keyframes string-draw {
+  from { stroke-dashoffset: 100; }
+  to { stroke-dashoffset: 0; }
+}
+.string-line {
+  stroke-dasharray: 100;
+  animation: string-draw 0.5s ease forwards;
+}
+
+/* ─── Case item hover ─── */
+.case-item {
+  position: relative;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+.case-item:hover {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.06);
+}
+.case-item.active-case {
+  background: rgba(245,166,35,0.06);
+  border-color: rgba(245,166,35,0.2);
+}
+
+/* ─── Scrollbar styling ─── */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.2);
+}

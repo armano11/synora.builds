@@ -1,212 +1,293 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>ORBIT — Operations Detective</title>
-  <!-- Google Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=Special+Elite&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <!-- Tailwind CDN for layout utilities only -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600&family=Geist:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="styles.css"/>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Geist', 'system-ui', 'sans-serif'],
+            mono: ['Geist Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
 </head>
-<body class="overflow-hidden h-screen select-none">
-  <!-- Distressed ink filter for stamps -->
-  <svg class="absolute w-0 h-0" width="0" height="0">
-    <defs>
-      <filter id="distressed-ink">
-        <feTurbulence type="fractalNoise" baseFrequency="0.95" numOctaves="4" result="noise" />
-        <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" xChannelSelector="R" yChannelSelector="G" result="displaced" />
-        <feComponentTransfer>
-          <feFuncA type="linear" slope="0.9" />
-        </feComponentTransfer>
-      </filter>
-    </defs>
-  </svg>
+<body class="h-full bg-[#0a0a0a] text-[#ededed] font-sans antialiased overflow-hidden select-none">
 
-  <!-- Top Bar (Conventional for usability) -->
-  <header class="h-14 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between px-6 z-50 relative">
-    <div class="flex items-center gap-4">
-      <span class="font-typewriter text-white text-xl tracking-wider">ORBIT</span>
-      <span class="text-zinc-600">|</span>
-      <span class="text-xs text-zinc-400 font-semibold uppercase tracking-widest bg-zinc-800 px-2.5 py-1 rounded" id="phase-banner">INGESTING</span>
-      <span class="text-xs font-semibold text-red-500 bg-red-950/50 border border-red-900/50 px-2 py-0.5 rounded hidden" id="replay-badge">REPLAY MODE</span>
-    </div>
-    
-    <div class="flex items-center gap-3">
-      <input type="text" id="order-id-input" placeholder="Enter Order ID (e.g. 402)" 
-             class="bg-zinc-800 border border-zinc-700 text-white text-sm rounded px-3 py-1.5 focus:outline-none focus:border-zinc-500 font-mono w-44">
-      <button id="investigate-btn" class="bg-red-700 hover:bg-red-600 text-white text-xs font-bold uppercase tracking-wider px-4 py-2 rounded transition-all">
-        Investigate
-      </button>
-    </div>
-  </header>
+<!-- SVG filter defs (offscreen) -->
+<svg class="absolute w-0 h-0 overflow-hidden">
+  <defs>
+    <filter id="glow-amber">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+</svg>
 
-  <!-- Main Board Container -->
-  <main class="relative flex-1 w-full overflow-hidden flex" style="height: calc(100vh - 3.5rem - 2rem);">
-    <!-- SVG overlay for strings -->
-    <svg id="string-overlay" class="absolute inset-0 pointer-events-none w-full h-full z-20"></svg>
+<!-- ═══════════════════════ TOP CHROME ═══════════════════════ -->
+<header id="header" class="fixed top-0 left-0 right-0 z-50 h-11 border-b border-white/[0.06] bg-[#0a0a0a]/90 backdrop-blur-sm flex items-center px-4 gap-4">
 
-    <!-- The Cork Board Canvas -->
-    <div id="corkboard" class="flex-1 relative overflow-auto p-8 flex flex-col justify-between">
-      
-      <!-- Upper Section: Portal Cards (The Pinned Photos) -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-6 z-10 max-w-5xl mx-auto w-full">
-        <!-- TALLY PORTAL -->
-        <div id="portal-tally" class="portal-card relative bg-[#f4efe4] p-4 shadow-xl border border-[#e5dec9]" style="transform: rotate(-1deg);">
-          <div class="pushpin"></div>
-          <div class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest border-b border-zinc-300 pb-1 mb-2">Tally ERP</div>
-          <div class="space-y-1 font-typewriter text-xs text-zinc-800">
-            <div>Order: <span class="order-id">-</span></div>
-            <div>Status: <span id="tally-status">Dispatched</span></div>
-            <div>Booking: <span id="tally-booking">none</span></div>
-          </div>
-          <div class="stamp-slot"></div>
-        </div>
-
-        <!-- GST PORTAL -->
-        <div id="portal-gst" class="portal-card relative bg-[#f4efe4] p-4 shadow-xl border border-[#e5dec9]" style="transform: rotate(1.5deg);">
-          <div class="pushpin"></div>
-          <div class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest border-b border-zinc-300 pb-1 mb-2">GST Portal</div>
-          <div class="space-y-1 font-typewriter text-xs text-zinc-800">
-            <div>Order: <span class="order-id">-</span></div>
-            <div>E-Way: <span id="gst-eway-status">expired</span></div>
-            <div>GSTR3B: <span id="gst-gstr3b">filed</span></div>
-          </div>
-          <div class="stamp-slot"></div>
-        </div>
-
-        <!-- DELHIVERY PORTAL -->
-        <div id="portal-delhivery" class="portal-card relative bg-[#f4efe4] p-4 shadow-xl border border-[#e5dec9]" style="transform: rotate(-0.5deg);">
-          <div class="pushpin"></div>
-          <div class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest border-b border-zinc-300 pb-1 mb-2">Delhivery</div>
-          <div class="space-y-1 font-typewriter text-xs text-zinc-800">
-            <div>Order: <span class="order-id">-</span></div>
-            <div>Status: <span id="delhivery-status">In Transit</span></div>
-            <div>Last Scan: <span id="delhivery-scan">Hubli</span></div>
-          </div>
-          <div class="stamp-slot"></div>
-        </div>
-
-        <!-- TRANSPORT PORTAL -->
-        <div id="portal-transport" class="portal-card relative bg-[#f4efe4] p-4 shadow-xl border border-[#e5dec9]" style="transform: rotate(1deg);">
-          <div class="pushpin"></div>
-          <div class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest border-b border-zinc-300 pb-1 mb-2">Transport</div>
-          <div class="space-y-1 font-typewriter text-xs text-zinc-800">
-            <div>Order: <span class="order-id">-</span></div>
-            <div>Status: <span id="transport-status">breakdown</span></div>
-            <div>Driver: <span id="transport-driver">Ramesh K</span></div>
-          </div>
-          <div class="stamp-slot"></div>
-        </div>
-      </div>
-
-      <!-- Middle Section: Hypotheses Notes (Kraft Paper) -->
-      <div id="hypotheses-container" class="flex flex-wrap justify-center gap-6 my-8 z-10 max-w-4xl mx-auto w-full">
-        <!-- Dynanically populated -->
-      </div>
-
-      <!-- Bottom Section: Evidence polaroids & logs -->
-      <div class="flex flex-col md:flex-row gap-6 items-end justify-between z-10 w-full mt-auto">
-        <!-- Evidence Area (Polaroids) -->
-        <div id="evidence-board" class="flex gap-4 overflow-x-auto py-2 max-w-2xl w-full">
-          <!-- Dynamically populated polaroids -->
-        </div>
-
-        <!-- Live Investigation Trace (Mono Typewriter) -->
-        <div class="w-80 h-36 bg-black/85 border border-zinc-800 rounded p-3 text-[10px] font-mono text-zinc-400 overflow-y-auto" id="trace-log">
-          <div class="text-zinc-500 mb-1 border-b border-zinc-900 pb-1">LIVE LOG TRAIL</div>
-          <div id="trace-lines" class="space-y-1"></div>
-        </div>
-      </div>
-
-      <!-- Approval Banner overlay (sliding) -->
-      <div id="approval-banner" class="absolute inset-x-0 bottom-0 bg-black/90 border-t border-red-950 p-6 z-40 transform translate-y-full transition-transform flex items-center justify-between">
-        <div>
-          <h3 class="text-lg font-typewriter text-white mb-1">AWAITING DECISION</h3>
-          <p id="approval-proposed-action" class="text-zinc-400 text-xs font-mono"></p>
-        </div>
-        <div class="flex items-center gap-4">
-          <button id="reject-btn" class="px-6 py-2 border border-zinc-700 text-zinc-400 hover:text-white rounded text-xs uppercase tracking-wider font-bold">
-            Reject Fix
-          </button>
-          <button id="approve-btn" class="relative group w-20 h-20 rounded-full bg-[#b93324] hover:bg-[#a02c1f] flex items-center justify-center shadow-lg transform active:scale-95 transition-all outline-none">
-            <span class="absolute inset-0.5 rounded-full border border-dashed border-red-900/60 pointer-events-none"></span>
-            <span class="font-typewriter text-[9px] text-[#f4efe4] font-bold text-center tracking-tighter leading-tight select-none">APPROVE<br>FIX</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Verdict Folder drawer (manila) -->
-      <div id="verdict-folder" class="absolute inset-x-0 bottom-0 bg-[#e8dcc0] border-t border-[#d5c9ad] shadow-2xl p-6 transform translate-y-full transition-transform duration-500 z-30 max-w-4xl mx-auto rounded-t-lg">
-        <div class="flex justify-between items-start border-b border-[#d5c9ad] pb-4 mb-4">
-          <div>
-            <span class="text-[9px] font-bold uppercase tracking-widest text-[#a89b7d]">Confidential Case File</span>
-            <h2 class="text-2xl font-typewriter text-zinc-800 mt-1" id="verdict-root-cause">Verdict: shipment_delay.h_eway_bill_expired</h2>
-          </div>
-          <div class="relative w-24 h-24 flex items-center justify-center flex-col border-4 border-red-700/80 rounded-full p-2" id="confidence-stamp">
-            <span class="text-[8px] uppercase font-bold tracking-widest text-red-800">Confidence</span>
-            <span class="text-xl font-typewriter font-bold text-red-700" id="verdict-confidence">91%</span>
-            <svg class="absolute inset-0 w-full h-full pointer-events-none" id="confidence-circle-svg">
-              <ellipse cx="48" cy="48" rx="42" ry="42" stroke="#b93324" stroke-width="2.5" fill="none" stroke-dasharray="300" stroke-dashoffset="300" id="confidence-ellipse"></ellipse>
-            </svg>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-3 gap-6 font-typewriter text-xs text-zinc-700">
-          <div>
-            <h4 class="font-bold border-b border-[#d5c9ad] pb-1 mb-2 uppercase text-[9px] tracking-wider text-[#a89b7d]">Eliminated Hypotheses</h4>
-            <ul id="verdict-ruled-out" class="list-disc list-inside space-y-1"></ul>
-          </div>
-          <div>
-            <h4 class="font-bold border-b border-[#d5c9ad] pb-1 mb-2 uppercase text-[9px] tracking-wider text-[#a89b7d]">Verified Execution</h4>
-            <div id="verdict-execution" class="space-y-1 font-mono text-[11px] text-zinc-600 bg-white/50 p-2 rounded"></div>
-          </div>
-          <div>
-            <h4 class="font-bold border-b border-[#d5c9ad] pb-1 mb-2 uppercase text-[9px] tracking-wider text-[#a89b7d]">Triggered Actions</h4>
-            <div id="verdict-actions" class="space-y-1 font-mono text-[11px] text-zinc-600 bg-white/50 p-2 rounded"></div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- Right Drawer: Closed cases list -->
-    <aside id="case-drawer" class="w-80 bg-zinc-900 border-l border-zinc-800 flex flex-col z-30 transition-all duration-300">
-      <div class="p-4 border-b border-zinc-800 flex items-center justify-between">
-        <span class="text-xs font-bold uppercase tracking-wider text-zinc-400">Closed Cases Archive</span>
-        <button id="refresh-cases-btn" class="text-zinc-500 hover:text-zinc-300 text-xs">Refresh</button>
-      </div>
-      <div id="cases-list" class="flex-1 overflow-y-auto p-4 space-y-3">
-        <!-- Dynamically populated closed cases -->
-      </div>
-    </aside>
-  </main>
-
-  <!-- Challenger Threat Modal/Overlay -->
-  <div id="challenger-overlay" class="absolute inset-0 bg-red-950/20 backdrop-blur-[1px] pointer-events-none opacity-0 z-40 transition-all duration-300 flex items-center justify-center">
-    <div class="text-center transform scale-90 transition-all duration-300" id="challenger-alert-box">
-      <div class="font-handwriting text-5xl text-red-500 tracking-wider mb-2 transform -rotate-3">CROSS EXAMINING VERDICT...</div>
-      <div class="font-mono text-zinc-400 text-xs uppercase tracking-widest max-w-md mx-auto" id="challenger-threat-text"></div>
-    </div>
+  <!-- Brand -->
+  <div class="flex items-center gap-2 shrink-0">
+    <span class="font-mono text-xs tracking-[0.25em] text-[#f5a623] font-medium">ORBIT</span>
+    <span class="text-white/20 text-xs">·</span>
+    <span class="font-mono text-[10px] text-white/30 tracking-widest">OPERATIONS DETECTIVE</span>
   </div>
 
-  <!-- Footer (Conventional for stats) -->
-  <footer class="h-8 bg-zinc-950 border-t border-zinc-900 flex items-center justify-between px-6 z-50 relative text-[10px] text-zinc-500">
-    <div class="flex items-center gap-6">
-      <div>CLOCK: <span id="wall-clock" class="font-mono">0.00s</span></div>
-      <div>LLM COST: <span id="llm-cost" class="font-mono">$0.0000</span></div>
-      <div>STATUS: <span id="server-status" class="font-mono text-green-500">CONNECTED</span></div>
-    </div>
-    <div class="flex items-center gap-4">
-      <a href="https://smith.langchain.com" target="_blank" class="hover:text-zinc-300 transition-colors">LANGSMITH TRACE ↗</a>
-      <span>·</span>
-      <span>CODE KUDLA 2026</span>
-    </div>
-  </footer>
+  <div class="flex-1 min-w-0"></div>
 
-  <script src="/static/app.js"></script>
+  <!-- Status pills -->
+  <div class="flex items-center gap-3 shrink-0">
+    <!-- Phase badge -->
+    <div id="phase-pill" class="phase-pill phase-idle">
+      <span id="phase-dot" class="phase-dot"></span>
+      <span id="phase-text" class="font-mono text-[10px] tracking-widest">IDLE</span>
+    </div>
+
+    <!-- Clock -->
+    <div class="font-mono text-[10px] text-white/30 tabular-nums w-16 text-right">
+      <span id="wall-clock">0.00s</span>
+    </div>
+
+    <!-- SSE status -->
+    <div id="sse-indicator" class="flex items-center gap-1.5">
+      <div id="sse-dot" class="w-1.5 h-1.5 rounded-full bg-white/20"></div>
+      <span id="sse-label" class="font-mono text-[10px] text-white/30">disconnected</span>
+    </div>
+
+    <!-- Replay badge -->
+    <div id="replay-badge" class="hidden font-mono text-[9px] text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-sm tracking-widest">REPLAY</div>
+  </div>
+</header>
+
+<!-- ═══════════════════════ COMMAND BAR ═══════════════════════ -->
+<div id="command-bar" class="fixed top-11 left-0 right-0 z-40 border-b border-white/[0.06] bg-[#0a0a0a]/80 backdrop-blur-sm px-4 py-2.5 flex items-center gap-3">
+  <span class="font-mono text-[10px] text-white/30 shrink-0">ORDER</span>
+  <div class="relative flex-1 max-w-xs">
+    <input
+      id="order-id-input"
+      type="text"
+      placeholder="402"
+      autocomplete="off"
+      class="command-input w-full font-mono text-sm bg-transparent border border-white/[0.08] rounded-md px-3 py-1.5 text-white/80 placeholder-white/20 focus:outline-none focus:border-[#f5a623]/50 focus:text-white transition-colors"
+    />
+  </div>
+  <button id="investigate-btn" class="cta-btn font-mono text-[11px] tracking-widest px-4 py-1.5 rounded-md shrink-0">
+    INVESTIGATE
+  </button>
+
+  <!-- Pending case banner — shows when email triggers arrive -->
+  <div id="pending-banner" class="hidden flex items-center gap-2 ml-auto">
+    <span class="w-1.5 h-1.5 rounded-full bg-[#f5a623] animate-pulse"></span>
+    <span id="pending-text" class="font-mono text-[10px] text-[#f5a623]">Email trigger pending</span>
+    <button id="pending-investigate-btn" class="font-mono text-[10px] text-[#f5a623] border border-[#f5a623]/30 hover:border-[#f5a623]/80 px-2 py-0.5 rounded-sm transition-colors">
+      INVESTIGATE →
+    </button>
+  </div>
+</div>
+
+<!-- ═══════════════════════ MAIN LAYOUT ═══════════════════════ -->
+<main class="fixed inset-0 top-[88px] flex overflow-hidden">
+
+  <!-- ─── LEFT RAIL: Case Files ─── -->
+  <aside class="w-56 shrink-0 border-r border-white/[0.06] flex flex-col overflow-hidden bg-[#0a0a0a]">
+
+    <div class="px-3 py-2.5 border-b border-white/[0.06] flex items-center justify-between">
+      <span class="font-mono text-[9px] tracking-[0.2em] text-white/30">CASE FILES</span>
+      <button id="refresh-cases-btn" class="font-mono text-[9px] text-white/20 hover:text-white/50 transition-colors">↻</button>
+    </div>
+
+    <div id="cases-list" class="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-hide">
+      <div class="py-6 text-center">
+        <span class="font-mono text-[10px] text-white/15">no cases</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ─── CENTER: Investigation Board ─── -->
+  <div class="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+
+    <!-- SVG strings layer -->
+    <svg id="string-svg" class="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible"></svg>
+
+    <!-- Portal cards row -->
+    <div id="portal-row" class="shrink-0 px-6 pt-5 pb-3 z-20 relative">
+      <div class="grid grid-cols-4 gap-3">
+
+        <div id="portal-tally" class="portal-card group">
+          <div class="portal-header">
+            <span class="portal-name">TALLY ERP</span>
+            <div id="stamp-tally" class="stamp-badge hidden"></div>
+          </div>
+          <div class="portal-status text-[#22c55e]">Dispatched ✓</div>
+          <div class="portal-sub order-id-label font-mono text-[10px] text-white/25 mt-1.5">Order —</div>
+          <div class="portal-anomaly hidden" id="anom-tally"></div>
+        </div>
+
+        <div id="portal-gst" class="portal-card group">
+          <div class="portal-header">
+            <span class="portal-name">GST PORTAL</span>
+            <div id="stamp-gst" class="stamp-badge hidden"></div>
+          </div>
+          <div id="gst-eway" class="portal-status text-[#ef4444]">E-Way Expired</div>
+          <div class="portal-sub order-id-label font-mono text-[10px] text-white/25 mt-1.5">Order —</div>
+          <div class="portal-anomaly hidden" id="anom-gst"></div>
+        </div>
+
+        <div id="portal-delhivery" class="portal-card group">
+          <div class="portal-header">
+            <span class="portal-name">DELHIVERY</span>
+            <div id="stamp-delhivery" class="stamp-badge hidden"></div>
+          </div>
+          <div class="portal-status text-[#f59e0b]">In Transit</div>
+          <div class="portal-sub order-id-label font-mono text-[10px] text-white/25 mt-1.5">Order —</div>
+          <div class="portal-anomaly hidden" id="anom-delhivery"></div>
+        </div>
+
+        <div id="portal-transport" class="portal-card group">
+          <div class="portal-header">
+            <span class="portal-name">TRANSPORT</span>
+            <div id="stamp-transport" class="stamp-badge hidden"></div>
+          </div>
+          <div class="portal-status text-[#f59e0b]">Breakdown</div>
+          <div class="portal-sub order-id-label font-mono text-[10px] text-white/25 mt-1.5">Order —</div>
+          <div class="portal-anomaly hidden" id="anom-transport"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Hypotheses row -->
+    <div class="shrink-0 px-6 pb-3 z-20 relative">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-mono text-[9px] tracking-[0.2em] text-white/25">HYPOTHESES</span>
+        <div class="flex-1 h-px bg-white/[0.05]"></div>
+      </div>
+      <div id="hypotheses-row" class="flex gap-2 flex-wrap min-h-[28px]">
+        <div class="font-mono text-[10px] text-white/15 italic">awaiting investigation…</div>
+      </div>
+    </div>
+
+    <!-- Separator -->
+    <div class="shrink-0 px-6">
+      <div class="h-px bg-white/[0.05]"></div>
+    </div>
+
+    <!-- Live trace log -->
+    <div class="flex-1 flex flex-col min-h-0 px-6 py-3 z-20 relative">
+      <div class="flex items-center gap-2 mb-2 shrink-0">
+        <span class="font-mono text-[9px] tracking-[0.2em] text-white/25">INVESTIGATION LOG</span>
+        <div class="flex-1 h-px bg-white/[0.05]"></div>
+        <button id="clear-log-btn" class="font-mono text-[9px] text-white/15 hover:text-white/40 transition-colors">clear</button>
+      </div>
+      <div id="trace-log" class="flex-1 overflow-y-auto font-mono text-[11px] leading-relaxed space-y-0.5 scrollbar-hide">
+        <div class="trace-idle">
+          <span class="text-white/15">›</span>
+          <span class="text-white/20 ml-1.5">waiting for case input</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ─── RIGHT RAIL: Verdict + Actions ─── -->
+  <aside class="w-72 shrink-0 border-l border-white/[0.06] flex flex-col overflow-hidden bg-[#0a0a0a]">
+
+    <!-- Verdict panel -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
+
+      <!-- Root cause -->
+      <div>
+        <div class="section-label">ROOT CAUSE</div>
+        <div id="verdict-root-cause" class="font-mono text-sm text-white/40 leading-snug mt-1.5">
+          — awaiting investigation
+        </div>
+      </div>
+
+      <!-- Confidence meter -->
+      <div>
+        <div class="flex items-center justify-between mb-1.5">
+          <div class="section-label">CONFIDENCE</div>
+          <div id="confidence-pct" class="font-mono text-xs font-semibold text-white/40">—</div>
+        </div>
+        <div class="h-1 bg-white/[0.06] rounded-full overflow-hidden">
+          <div id="confidence-bar" class="h-full bg-[#f5a623] rounded-full transition-all duration-700" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Evidence trail -->
+      <div>
+        <div class="section-label mb-1.5">EVIDENCE</div>
+        <div id="evidence-list" class="space-y-1.5">
+          <div class="font-mono text-[10px] text-white/20 italic">—</div>
+        </div>
+      </div>
+
+      <!-- Eliminated -->
+      <div>
+        <div class="section-label mb-1.5">ELIMINATED</div>
+        <div id="ruled-out-list" class="space-y-1">
+          <div class="font-mono text-[10px] text-white/20 italic">—</div>
+        </div>
+      </div>
+
+      <!-- Execution -->
+      <div id="execution-section" class="hidden">
+        <div class="section-label mb-1.5">EXECUTION</div>
+        <div id="execution-detail" class="execution-card"></div>
+      </div>
+
+      <!-- Actions -->
+      <div>
+        <div class="section-label mb-1.5">ACTIONS</div>
+        <div id="actions-list" class="space-y-1.5">
+          <div class="font-mono text-[10px] text-white/20 italic">—</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Approval gate (shows on interrupt) -->
+    <div id="approval-gate" class="hidden shrink-0 border-t border-white/[0.06] p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#f5a623] animate-pulse"></span>
+        <span class="font-mono text-[10px] tracking-widest text-[#f5a623]">AUTHORIZE FIX?</span>
+      </div>
+      <div id="approval-action-text" class="font-mono text-[10px] text-white/50 mb-3 leading-relaxed"></div>
+      <div class="flex gap-2">
+        <button id="reject-btn" class="flex-1 action-btn-reject">REJECT</button>
+        <button id="approve-btn" class="flex-1 action-btn-approve">AUTHORIZE →</button>
+      </div>
+    </div>
+
+  </aside>
+</main>
+
+<!-- ═══════════════════════ CHALLENGER MODAL ═══════════════════════ -->
+<div id="challenger-modal" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end justify-center pb-8">
+  <div class="challenger-box w-full max-w-lg mx-4">
+    <div class="flex items-center gap-2 mb-3">
+      <div class="w-1.5 h-1.5 rounded-full bg-[#ef4444] animate-pulse"></div>
+      <span class="font-mono text-[10px] tracking-[0.3em] text-[#ef4444]">ADVERSARIAL CHALLENGE</span>
+    </div>
+    <div id="challenger-text" class="font-mono text-sm text-white/70 leading-relaxed mb-3"></div>
+    <div id="challenger-evidence" class="font-mono text-[10px] text-white/35 space-y-0.5"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ TOAST ═══════════════════════ -->
+<div id="toast-container" class="fixed bottom-4 right-4 z-[100] space-y-2 pointer-events-none"></div>
+
+<script src="app.js"></script>
 </body>
 </html>

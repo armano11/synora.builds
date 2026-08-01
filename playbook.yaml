@@ -1,0 +1,161 @@
+# ORBIT — investigation playbook (THE MOAT)
+# Declarative case logic: which evidence eliminates which hypothesis, per case type.
+# Router loads this; nothing investigation-related is hardcoded in LLM prompts.
+# This file is the answer to "why not just a chatbot?".
+
+case_types:
+  shipment_delay:
+    triggers: ["shipment stuck", "order late", "no tracking", "vehicle breakdown"]
+    hypotheses:
+      - id: h_eway_bill_expired
+        label: "E-way bill expired"
+        investigator: gst
+        check: {db: gst_portal, table: eway_bills, key: order_id}
+        eliminates_if_clean: [h_eway_bill_expired]
+      - id: h_inventory_damage
+        label: "Inventory damaged in staging"
+        investigator: inventory
+        check: {db: tally_erp, table: inventory, key: sku}
+        eliminates_if_clean: [h_inventory_damage]
+      - id: h_dispatch_failure
+        label: "Dispatch never happened"
+        investigator: warehouse
+        check: {db: tally_erp, table: orders, key: order_id}
+        eliminates_if_clean: [h_dispatch_failure]
+      - id: h_transport_breakdown
+        label: "Transport breakdown"
+        investigator: transport
+        check: {db: transport, table: bookings, key: order_id}
+        eliminates_if_clean: [h_transport_breakdown]
+    portal_stamp_rules:
+      tally:
+        if: "order_status=Dispatched and transport_booking=none"
+        stamp: "STALE"
+        reason: "order status ≠ shipment status"
+      transport:
+        if: "breakdown_claimed and eway_bill=expired"
+        stamp: "MISLEADING"
+        reason: "breakdown is excuse — waiting for e-way bill renewal"
+      gst:
+        if: "eway_bill=expired"
+        stamp: "TRUE"
+        reason: "validity lapsed, can't cross border"
+      delhivery:
+        if: "last_scan_age_days > 3"
+        stamp: "STALE"
+        reason: "last scan 6 days old"
+
+  payment_hold:
+    triggers: ["payment held", "cheque returned", "no payment received", "bank hold"]
+    hypotheses:
+      - id: h_payment_hold_bank_recon
+        label: "Payment stuck in bank reconciliation"
+        investigator: inventory
+        check: {db: tally_erp, table: orders, key: order_id}
+        eliminates_if_clean: [h_payment_hold_bank_recon]
+      - id: h_payment_hold_buyer_default
+        label: "Buyer withheld payment"
+        investigator: transport
+        check: {db: transport, table: bookings, key: order_id}
+        eliminates_if_clean: [h_payment_hold_buyer_default]
+    portal_stamp_rules:
+      tally:
+        if: "order_status=Dispatched and payment_received=false"
+        stamp: "STALE"
+        reason: "dispatch status does not confirm payment"
+      transport:
+        if: "delivered and payment_received=false"
+        stamp: "MISLEADING"
+        reason: "delivery completed but payment gate remains blocked"
+
+  inventory_mismatch:
+    triggers: ["stock mismatch", "inventory shortage", "count differs", "stock not found"]
+    hypotheses:
+      - id: h_inventory_count_error
+        label: "Cycle count error in system stock"
+        investigator: inventory
+        check: {db: tally_erp, table: inventory, key: sku}
+        eliminates_if_clean: [h_inventory_count_error]
+      - id: h_inventory_damage_loss
+        label: "Stock damaged or lost in DC"
+        investigator: warehouse
+        check: {db: tally_erp, table: orders, key: order_id}
+        eliminates_if_clean: [h_inventory_damage_loss]
+    portal_stamp_rules:
+      tally:
+        if: "order_status=Dispatched and stock_booked=false"
+        stamp: "MISLEADING"
+        reason: "booked stock does not match counted stock"
+      gst:
+        if: "eway_bill=active and stock_mismatch"
+        stamp: "STALE"
+        reason: "tax document exists but physical stock disagrees"
+
+  customs_block:
+    triggers: ["customs hold", "documents incomplete", "clearance stuck", "port hold"]
+    hypotheses:
+      - id: h_customs_docs_incomplete
+        label: "Documents incomplete at customs"
+        investigator: gst
+        check: {db: gst_portal, table: eway_bills, key: order_id}
+        eliminates_if_clean: [h_customs_docs_incomplete]
+      - id: h_customs_inspection
+        label: "Physical inspection in progress"
+        investigator: transport
+        check: {db: transport, table: bookings, key: order_id}
+        eliminates_if_clean: [h_customs_inspection]
+    portal_stamp_rules:
+      gst:
+        if: "eway_bill=expired and docs_incomplete"
+        stamp: "TRUE"
+        reason: "expired permit blocks customs clearance"
+      delhivery:
+        if: "last_scan_age_days > 3"
+        stamp: "STALE"
+        reason: "shipment not moving through customs"
+
+  invoice_dispute:
+    triggers: ["invoice mismatch", "amount dispute", "wrong invoice", "billing error"]
+    hypotheses:
+      - id: h_invoice_amount_mismatch
+        label: "Invoice amount differs from PO"
+        investigator: inventory
+        check: {db: tally_erp, table: orders, key: order_id}
+        eliminates_if_clean: [h_invoice_amount_mismatch]
+      - id: h_invoice_tax_error
+        label: "GST rate applied incorrectly"
+        investigator: gst
+        check: {db: gst_portal, table: eway_bills, key: order_id}
+        eliminates_if_clean: [h_invoice_tax_error]
+    portal_stamp_rules:
+      tally:
+        if: "invoice_amount != po_amount"
+        stamp: "TRUE"
+        reason: "invoiced amount contradicts PO amount"
+      gst:
+        if: "eway_bill=active and tax_rate_wrong"
+        stamp: "MISLEADING"
+        reason: "tax filing exists but rate contradicts invoice"
+
+  compliance_block:
+    triggers: ["license expired", "registration lapsed", "permit missing", "compliance hold"]
+    hypotheses:
+      - id: h_compliance_license_expired
+        label: "Operator license expired"
+        investigator: transport
+        check: {db: transport, table: bookings, key: order_id}
+        eliminates_if_clean: [h_compliance_license_expired]
+      - id: h_compliance_docs_missing
+        label: "Required compliance docs missing"
+        investigator: gst
+        check: {db: gst_portal, table: eway_bills, key: order_id}
+        eliminates_if_clean: [h_compliance_docs_missing]
+    portal_stamp_rules:
+      transport:
+        if: "breakdown_claimed=false and license_expired"
+        stamp: "TRUE"
+        reason: "expired license grounds the vehicle"
+      gst:
+        if: "eway_bill=expired"
+        stamp: "MISLEADING"
+        reason: "tax status is a symptom, not the root cause"

@@ -22,3 +22,6 @@ replay/*.json
 Thumbs.db
 .vscode/
 .idea/
+
+# agent scratch (SDD ledger, briefs, reports)
+.superpowers/

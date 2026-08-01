@@ -16,6 +16,7 @@ fallback model — the demo never dies on one provider's hiccup.
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -75,28 +76,47 @@ def get_llm(temperature: float = 0.0) -> ChatOpenAI:
 
 
 def _is_transient(exc: Exception) -> bool:
-    """529 overloaded / 5xx / connection errors are retryable."""
+    """Hangs, 429/529 overloaded, 5xx, connection errors are retryable."""
     name = type(exc).__name__.lower()
     message = str(exc).lower()
-    return "529" in message or "internal" in name or "overloaded" in message
+    return (
+        "timeout" in name
+        or "429" in message
+        or "529" in message
+        or "internal" in name
+        or "overloaded" in message
+    )
 
 
-async def ainvoke_with_retry(runnable, messages: list, attempts: int = 3, backoff_s: float = 2.0):
+# The free tier throttles concurrent calls (429 storms under Send() fan-out);
+# a global cap keeps the demo alive without changing the graph topology.
+_LLM_SEMAPHORE = asyncio.Semaphore(2)
+
+# Hard per-call ceiling. The OpenAI client's own timeout is NOT reliable on a
+# congested provider — a hung call would otherwise stall the graph forever
+# (NIM free tier: 40-60s common, multi-minute hangs under load). An asyncio
+# backstop converts hangs into retries with visible progress.
+_CALL_TIMEOUT_S = 120.0
+
+
+async def ainvoke_with_retry(runnable, messages: list, attempts: int = 5, backoff_s: float = 1.5):
     """Async invoke with exponential backoff on transient failures.
 
-    Transient = 529 overloaded / 5xx / connection errors. Deterministic
-    failures (auth, bad schema) surface immediately. Never used to mask
-    real errors — the final attempt's exception still propagates.
+    Transient = hangs, 429/529 overloaded, 5xx, connection errors.
+    Deterministic failures (auth, bad schema) surface immediately. Never
+    used to mask real errors — the final attempt's exception still
+    propagates (as asyncio.TimeoutError when the provider stalls).
     """
-    import asyncio
-
-    last: Exception | None = None
-    for attempt in range(attempts):
-        try:
-            return await runnable.ainvoke(messages)
-        except Exception as exc:  # noqa: BLE001
-            last = exc
-            if not _is_transient(exc) or attempt == attempts - 1:
-                raise
-            await asyncio.sleep(backoff_s * (2**attempt))
-    raise last  # type: ignore[misc]
+    async with _LLM_SEMAPHORE:
+        last: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                return await asyncio.wait_for(
+                    runnable.ainvoke(messages), timeout=_CALL_TIMEOUT_S
+                )
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                if not _is_transient(exc) or attempt == attempts - 1:
+                    raise
+                await asyncio.sleep(backoff_s * (2**attempt))
+        raise last  # type: ignore[misc]

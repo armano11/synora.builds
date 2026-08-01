@@ -30,11 +30,14 @@ import asyncio
 import logging
 import os
 
+from dotenv import load_dotenv
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 from actions._common import eway_bill_culprit
 from actions.eta_recalc import recalc_eta
 from contracts import ActionResult, CasePayload, Verdict
+
+load_dotenv()
 
 _log = logging.getLogger("orbit.telegram")
 _CB_FAILURES_SEEN: set[str] = set()

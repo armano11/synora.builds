@@ -160,6 +160,42 @@ async def send_alert(case: CasePayload) -> ActionResult:
         )
 
 
+async def send_initial_alert(case: CasePayload) -> ActionResult:
+    """Send an initial Telegram alert when an angry email arrives.
+
+    Includes a [🔍 INVESTIGATE] inline button that triggers the investigation
+    when pressed. The callback_data is 'investigate:<case_id>'.
+    """
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return ActionResult(type="telegram", status="failed", error="Telegram env not configured")
+    try:
+        bot = Bot(token)
+    except Exception as exc:
+        return ActionResult(type="telegram", status="failed", error=f"Telegram bot failed: {exc}")
+
+    urgency_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(
+        getattr(case, "urgency", "medium"), "🟡"
+    )
+    text = (
+        f"{urgency_emoji} NEW CASE — {case.intent or 'angry_customer'}\n"
+        f"Order #{case.order_id}\n"
+        f"From: {case.sender or 'unknown'}\n"
+        f"Symptom: {case.symptom}\n"
+        f"Summary: {case.summary or '—'}\n\n"
+        f"Tap INVESTIGATE to start the investigation."
+    )
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔍 INVESTIGATE", callback_data=f"investigate:{case.case_id}")
+    ]])
+    try:
+        msg = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        return ActionResult(type="telegram", status="sent", ref=str(msg.message_id))
+    except Exception as exc:
+        return ActionResult(type="telegram", status="failed", error=f"Telegram send failed: {exc}")
+
+
 async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
     """Poll get_updates forever; on "investigate:<case_id>" press, run the flow.
 

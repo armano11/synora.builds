@@ -107,7 +107,7 @@ def _get_semaphore() -> asyncio.Semaphore:
     except RuntimeError:
         loop_id = 0
     if _LLM_SEMAPHORE is None or _LLM_SEMAPHORE_LOOP_ID != loop_id:
-        _LLM_SEMAPHORE = asyncio.Semaphore(2)
+        _LLM_SEMAPHORE = asyncio.Semaphore(4)
         _LLM_SEMAPHORE_LOOP_ID = loop_id
     return _LLM_SEMAPHORE
 

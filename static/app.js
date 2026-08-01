@@ -97,7 +97,7 @@ function boot() {
   onCaseTypeChange();
 
   loadCases();
-  setInterval(loadCases, 5000);
+  setInterval(loadCases, 2000);
   tickClock();
 }
 
@@ -122,13 +122,15 @@ function setPhase(phase) {
 
 // ─── SSE Connection ───────────────────────────────────────────────────────
 function connectSSE(caseId, isReplay = false) {
+  // Close any existing connection first
   if (state.eventSource) { state.eventSource.close(); state.eventSource = null; }
   clearTimeout(state.reconnectTimer);
+  state.reconnectAttempts = 0;
 
   const url = isReplay ? `/api/replay/${caseId}` : `/api/stream/${caseId}`;
   const es = new EventSource(url);
   state.eventSource = es;
-  setSseStatus('streaming', caseId ? 'streaming' : 'connecting');
+  setSseStatus('streaming', 'connecting');
 
   es.onopen = () => {
     state.reconnectAttempts = 0;
@@ -139,19 +141,36 @@ function connectSSE(caseId, isReplay = false) {
   es.onmessage = (e) => {
     try {
       const payload = JSON.parse(e.data);
-      if (payload === null) { es.close(); state.eventSource = null; return; }
+      if (payload === null) {
+        es.close();
+        state.eventSource = null;
+        setSseStatus('streaming', 'done');
+        return;
+      }
       if (payload.replay) document.getElementById('replay-badge').classList.remove('hidden');
       handleEvent(payload);
       resetStaleTimer();
-    } catch {}
+    } catch (err) {
+      // Ignore parse errors, keep streaming
+    }
   };
 
   es.onerror = () => {
-    setSseStatus('error', 'disconnected');
     es.close();
     state.eventSource = null;
-    if (state.phase === 'CLOSED') return;
-    scheduleReconnect(caseId, isReplay);
+    // Don't reconnect if case is closed or idle
+    if (state.phase === 'CLOSED' || state.phase === 'IDLE') {
+      setSseStatus('error', 'done');
+      return;
+    }
+    // Quick reconnect for active investigations
+    if (state.reconnectAttempts < 3) {
+      state.reconnectAttempts++;
+      setSseStatus('connecting', `retry ${state.reconnectAttempts}`);
+      state.reconnectTimer = setTimeout(() => connectSSE(caseId, isReplay), 1000);
+    } else {
+      setSseStatus('error', 'disconnected');
+    }
   };
 }
 
@@ -211,9 +230,13 @@ async function triggerPending(caseId) {
 }
 
 function startCase(caseId) {
+  // Clean reset
+  if (state.eventSource) { state.eventSource.close(); state.eventSource = null; }
   state.activeCaseId = caseId;
   state.startTime = Date.now();
   state.confidence = 0;
+  state.reconnectAttempts = 0;
+  resetBoard();
   setPhase('INGESTING');
   document.getElementById('confidence-section').classList.remove('hidden');
   connectSSE(caseId);
@@ -507,8 +530,10 @@ function onCaseClosed(p) {
     addTrace('orbit', `case closed in ${p.wall_clock_s}s`, 'tag-closed');
     toast(`Case closed in ${p.wall_clock_s}s`, 'success');
   }
+  // Close SSE cleanly
   if (state.eventSource) { state.eventSource.close(); state.eventSource = null; }
   setSseStatus('streaming', 'done');
+  // Refresh case list after a short delay
   setTimeout(loadCases, 1000);
 }
 
@@ -516,6 +541,7 @@ function onCaseClosed(p) {
 async function sendApproval(approved) {
   if (!state.activeCaseId) return;
   document.getElementById('approval-gate').classList.add('hidden');
+  setPhase('EXECUTING');
   try {
     await fetch(`/api/approve/${state.activeCaseId}`, {
       method: 'POST',
@@ -523,6 +549,9 @@ async function sendApproval(approved) {
       body: JSON.stringify({ approved }),
     });
     addTrace('gate', approved ? 'approved — executing fix' : 'rejected — no execution', 'tag-gate');
+    // Reconnect SSE to get the execution events
+    if (state.eventSource) { state.eventSource.close(); state.eventSource = null; }
+    state.reconnectAttempts = 0;
     connectSSE(state.activeCaseId);
   } catch (e) { toast('Approval failed.', 'error'); }
 }
@@ -622,18 +651,14 @@ async function loadCases() {
     const d = await r.json();
     renderCases(d.cases || []);
 
-    // Auto-connect to active case if we're not streaming
+    // Auto-connect to active/awaiting case if not already streaming
     const active = (d.cases || []).find(c => c.status === 'active' || c.status === 'awaiting_approval');
     if (active && !state.eventSource && active.case_id !== state.activeCaseId) {
-      state.activeCaseId = active.case_id;
-      state.startTime = Date.now();
-      setPhase('INVESTIGATING');
-      document.getElementById('confidence-section').classList.remove('hidden');
-      connectSSE(active.case_id);
+      startCase(active.case_id);
       toast('Auto-connected to active investigation', 'info');
     }
 
-    // Check for pending cases
+    // Pending cases
     const pending = (d.cases || []).filter(c => c.status === 'pending');
     if (pending.length > 0 && !state.activeCaseId) {
       showPendingBanner(pending[0]);

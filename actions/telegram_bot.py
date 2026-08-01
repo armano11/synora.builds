@@ -265,11 +265,6 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
                     case_id = cb.data.split(":", 1)[1]
                     try:
                         await bot.answer_callback_query(callback_query_id=cb.id)
-                        await bot.edit_message_text(
-                            "🔍 Investigation started — watch the console",
-                            message_id=cb.message.message_id,
-                            chat_id=cb.message.chat.id,
-                        )
                         await on_investigate(case_id)
                     except Exception as exc:
                         _log_callback_failure(f"investigate {case_id} failed: {exc}")

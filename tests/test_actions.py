@@ -574,6 +574,7 @@ async def test_poll_callbacks_investigate_flow_and_offset_advance(monkeypatch):
     monkeypatch.setattr("actions.telegram_bot.Bot", FakeBot)
     task = asyncio.create_task(poll_callbacks(on_investigate, interval=0))
     await asyncio.wait_for(invoked.wait(), timeout=5)
+    await asyncio.sleep(0.1)  # let the loop make its second get_updates call
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

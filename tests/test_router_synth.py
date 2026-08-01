@@ -23,6 +23,7 @@ from enterprise import query as eq
 pytestmark = pytest.mark.skipif(
     not (
         os.environ.get("DEEPSEEK_API_KEY")
+        or os.environ.get("MISTRAL_API_KEY")
         or os.environ.get("OPENAI_API_KEY")
         or os.environ.get("LLM_API_KEY")
     ),

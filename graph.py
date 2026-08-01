@@ -564,11 +564,13 @@ async def approval_gate_node(state: InvestigationState) -> dict:
         before_payload = {"culprit": culprit}
 
     # Send Telegram verdict alert with Approve/Reject buttons
-    try:
-        from actions.telegram_bot import send_verdict_alert
-        await send_verdict_alert(state["verdict"], case)
-    except Exception as exc:
-        _log.warning(f"Telegram verdict alert failed: {exc}")
+    # Only on first entry (not on resume — node re-runs from beginning on resume)
+    if "approved" not in state:
+        try:
+            from actions.telegram_bot import send_verdict_alert
+            await send_verdict_alert(state["verdict"], case)
+        except Exception as exc:
+            _log.warning(f"Telegram verdict alert failed: {exc}")
 
     payload = {
         "type": "approval_required",

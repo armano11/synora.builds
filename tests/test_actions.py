@@ -562,6 +562,9 @@ async def test_poll_callbacks_investigate_flow_and_offset_advance(monkeypatch):
         async def answer_callback_query(self, callback_query_id, text=None):
             seen["answered"] = callback_query_id
 
+        async def send_message(self, chat_id=None, text=None, reply_markup=None):
+            seen.setdefault("sent_messages", []).append(text)
+
         async def edit_message_text(self, text, message_id=None, chat_id=None):
             seen["edited"] = (text, message_id, chat_id)
 

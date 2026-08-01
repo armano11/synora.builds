@@ -296,9 +296,10 @@ async def api_replay(case_id: str):
 @app.get("/", response_class=HTMLResponse)
 async def index():
     index_file = STATIC_DIR / "index.html"
+    headers = {"Cache-Control": "no-cache, no-store, must-revalidate"}
     if index_file.exists():
-        return HTMLResponse(index_file.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>ORBIT — Evidence Board loading...</h1>")
+        return HTMLResponse(index_file.read_text(encoding="utf-8"), headers=headers)
+    return HTMLResponse("<h1>ORBIT — Evidence Board loading...</h1>", headers=headers)
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

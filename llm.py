@@ -115,10 +115,10 @@ def _get_semaphore() -> asyncio.Semaphore:
 # congested provider — a hung call would otherwise stall the graph forever
 # (NIM free tier: 40-60s common, multi-minute hangs under load). An asyncio
 # backstop converts hangs into retries with visible progress.
-_CALL_TIMEOUT_S = 30.0
+_CALL_TIMEOUT_S = 12.0
 
 
-async def ainvoke_with_retry(runnable, messages: list, attempts: int = 3, backoff_s: float = 0.5):
+async def ainvoke_with_retry(runnable, messages: list, attempts: int = 2, backoff_s: float = 0.5):
     """Async invoke with exponential backoff on transient failures.
 
     Transient = hangs, 429/529 overloaded, 5xx, connection errors.

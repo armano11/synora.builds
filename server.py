@@ -23,7 +23,7 @@ from uuid import uuid4
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -300,6 +300,16 @@ async def index():
     if index_file.exists():
         return HTMLResponse(index_file.read_text(encoding="utf-8"), headers=headers)
     return HTMLResponse("<h1>ORBIT — Evidence Board loading...</h1>", headers=headers)
+
+@app.get("/app.js")
+async def serve_app_js():
+    headers = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+    return FileResponse(STATIC_DIR / "app.js", media_type="application/javascript", headers=headers)
+
+@app.get("/styles.css")
+async def serve_styles_css():
+    headers = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+    return FileResponse(STATIC_DIR / "styles.css", media_type="text/css", headers=headers)
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

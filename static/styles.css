@@ -438,6 +438,117 @@
   background: rgba(245,166,35,0.14);
 }
 
+/* ─── Case select ─── */
+.case-select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='rgba(255,255,255,0.3)' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  padding-right: 20px !important;
+}
+.case-select option {
+  background: #0a0a0a;
+  color: #ededed;
+}
+
+/* ─── Confidence meter ─── */
+#confidence-bar {
+  box-shadow: 0 0 8px rgba(245,166,35,0.3);
+}
+#confidence-bar[style*="width: 9"] {
+  box-shadow: 0 0 12px rgba(34,197,94,0.4);
+}
+
+/* ─── Evidence item ─── */
+.evidence-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  transition: all 0.2s ease;
+}
+.evidence-item.culprit {
+  background: rgba(245,166,35,0.06);
+  border-color: rgba(245,166,35,0.2);
+}
+.evidence-item:hover {
+  background: rgba(255,255,255,0.04);
+}
+.ev-source {
+  color: rgba(255,255,255,0.4);
+  font-size: 10px;
+  min-width: 60px;
+}
+.ev-status {
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.ev-detail {
+  color: rgba(255,255,255,0.5);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* ─── Trace line ─── */
+.trace-line {
+  display: flex;
+  gap: 6px;
+  padding: 1px 0;
+  opacity: 0;
+  animation: trace-in 0.3s ease forwards;
+}
+@keyframes trace-in {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.trace-time {
+  color: rgba(255,255,255,0.15);
+  font-size: 10px;
+  tabular-nums: ;
+  flex-shrink: 0;
+}
+.trace-src {
+  color: rgba(255,255,255,0.3);
+  font-size: 10px;
+  min-width: 70px;
+  flex-shrink: 0;
+}
+.trace-msg {
+  color: rgba(255,255,255,0.5);
+  font-size: 10px;
+}
+.tag-culprit .trace-msg { color: rgba(245,166,35,0.8); }
+.tag-survived .trace-msg { color: rgba(34,197,94,0.7); }
+.tag-refuted .trace-msg { color: rgba(239,68,68,0.7); }
+.tag-verdict .trace-msg { color: rgba(245,166,35,0.9); font-weight: 500; }
+.tag-executed .trace-msg { color: rgba(34,197,94,0.7); }
+.tag-challenger .trace-msg { color: rgba(239,68,68,0.6); }
+.tag-gate .trace-msg { color: rgba(245,166,35,0.7); }
+.tag-closed .trace-msg { color: rgba(34,197,94,0.8); font-weight: 500; }
+.tag-error .trace-msg { color: rgba(239,68,68,0.7); }
+
+/* ─── Case item ─── */
+.case-item {
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.case-item:hover {
+  background: rgba(255,255,255,0.03);
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 900px) {
   main { flex-direction: column; overflow-y: auto; }

@@ -27,7 +27,8 @@ def query_tally(order_id: str) -> dict:
     result = _fetch_one(
         "tally_erp.db",
         "SELECT order_id, customer, order_date, status, dispatch_date,"
-        " transport_booking, amount FROM orders WHERE order_id = ?",
+        " transport_booking, amount, payment_received, stock_booked,"
+        " invoice_amount, po_amount, delivered FROM orders WHERE order_id = ?",
         order_id,
     )
     if not result:
@@ -53,7 +54,8 @@ def query_gst(order_id: str) -> dict:
     return _fetch_one(
         "gst_portal.db",
         "SELECT order_id, eway_number, validity_from, validity_to,"
-        " eway_status, gstr3b_filed FROM eway_bills WHERE order_id = ?",
+        " eway_status, gstr3b_filed, docs_incomplete, tax_rate_wrong"
+        " FROM eway_bills WHERE order_id = ?",
         order_id,
     )
 
@@ -72,7 +74,8 @@ def query_transport(order_id: str) -> dict:
     """Transport booking record (transport.db)."""
     return _fetch_one(
         "transport.db",
-        "SELECT order_id, vehicle_no, driver, status, breakdown_claimed, breakdown_reason"
+        "SELECT order_id, vehicle_no, driver, status, breakdown_claimed,"
+        " breakdown_reason, license_expired, delivered"
         " FROM bookings WHERE order_id = ?",
         order_id,
     )

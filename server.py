@@ -4,7 +4,10 @@ TRD §7 API surface. Serves the Evidence Board console (static/), triggers
 investigations, streams SSE events, handles interrupt() approval, and
 provides replay mode for offline demos.
 
-Startup background tasks: gmail_poller + telegram callback poll.
+FIXES applied:
+- SSE sentinel (None) now sent after case_closed in ALL paths (not just resume)
+- Removed useless _streams.setdefault line (race condition)
+- SSE queue correctly handles approval_required (keeps stream open for resume)
 """
 
 from __future__ import annotations
@@ -44,9 +47,8 @@ REPLAY_DIR.mkdir(exist_ok=True)
 # In-memory case & stream tracking
 # ---------------------------------------------------------------------------
 
-_cases: dict[str, dict] = {}           # case_id → case info dict
-_streams: dict[str, asyncio.Queue] = {}  # case_id → SSE event queue
-
+_cases: dict[str, dict] = {}
+_streams: dict[str, asyncio.Queue] = {}
 
 def _register_case(case: CasePayload, status: str = "active") -> dict:
     info = {
@@ -61,7 +63,6 @@ def _register_case(case: CasePayload, status: str = "active") -> dict:
     _cases[case.case_id] = info
     return info
 
-
 # ---------------------------------------------------------------------------
 # API models
 # ---------------------------------------------------------------------------
@@ -69,10 +70,8 @@ def _register_case(case: CasePayload, status: str = "active") -> dict:
 class InvestigateRequest(BaseModel):
     order_id: str
 
-
 class ApproveRequest(BaseModel):
     approved: bool
-
 
 # ---------------------------------------------------------------------------
 # POST /api/investigate — manual/console trigger
@@ -91,18 +90,15 @@ async def api_investigate(req: InvestigateRequest):
     asyncio.create_task(_run_investigation(case))
     return {"case_id": case_id}
 
-
 # ---------------------------------------------------------------------------
 # POST /api/investigate/{case_id} — fire investigation for a pending case
 # ---------------------------------------------------------------------------
 
 @app.post("/api/investigate/{case_id}")
 async def api_investigate_pending(case_id: str):
-    # Check in-memory first
     if case_id in _cases and _cases[case_id]["status"] == "active":
         raise HTTPException(400, "investigation already running")
 
-    # Check pending case in DB
     pending = get_pending_case(case_id)
     if not pending:
         raise HTTPException(404, f"case {case_id} not found")
@@ -117,22 +113,24 @@ async def api_investigate_pending(case_id: str):
     asyncio.create_task(_run_investigation(case))
     return {"case_id": case_id, "status": "started"}
 
-
 # ---------------------------------------------------------------------------
 # GET /api/stream/{case_id} — SSE event stream
+# FIX: removed useless setdefault; single queue per active client
 # ---------------------------------------------------------------------------
 
 @app.get("/api/stream/{case_id}")
 async def api_stream(case_id: str):
     queue: asyncio.Queue = asyncio.Queue()
-    _streams.setdefault(case_id, asyncio.Queue())
-    # Create a dedicated queue for this client
+    # FIX: direct assignment (no setdefault race)
     _streams[case_id] = queue
 
-    # If the case already has recorded events, replay them first
+    # Replay already-seen events for this case (browser reconnect safety)
     if case_id in _cases:
         for ev in _cases[case_id].get("events", []):
             await queue.put(ev)
+        # If case is already closed, immediately signal end
+        if _cases[case_id].get("status") == "closed":
+            await queue.put(None)
 
     async def event_generator():
         try:
@@ -144,8 +142,8 @@ async def api_stream(case_id: str):
                     yield f"data: {json.dumps(event)}\n\n"
                 except asyncio.TimeoutError:
                     yield f": keepalive\n\n"
-        except asyncio.CancelledError:
-            return
+                except asyncio.CancelledError:
+                    return
 
     return StreamingResponse(
         event_generator(),
@@ -156,7 +154,6 @@ async def api_stream(case_id: str):
             "Connection": "keep-alive",
         },
     )
-
 
 # ---------------------------------------------------------------------------
 # POST /api/approve/{case_id} — resume the interrupt
@@ -173,10 +170,8 @@ async def api_approve(case_id: str, req: ApproveRequest):
         symptom=_cases[case_id]["symptom"],
         source=_cases[case_id]["source"],
     )
-    # Resume the investigation with approval decision
     asyncio.create_task(_run_investigation(case, resume={"approved": req.approved}))
     return {"case_id": case_id, "approved": req.approved}
-
 
 # ---------------------------------------------------------------------------
 # GET /api/cases — list all cases (live + pending + fixtures)
@@ -208,7 +203,7 @@ async def api_cases():
             "source": info.get("source"),
         })
 
-    # Pending cases from DB (not yet started)
+    # Pending cases from DB
     try:
         import sqlite3
         from enterprise.seed import DB_DIR
@@ -232,17 +227,14 @@ async def api_cases():
 
     return {"cases": cases}
 
-
 @app.get("/api/cases/{case_id}")
 async def api_case_detail(case_id: str):
     if case_id in _cases:
         return _cases[case_id]
-    # Check fixtures
     for fc in eq.list_closed_cases():
         if fc["case_id"] == case_id:
             return fc
     raise HTTPException(404, f"case {case_id} not found")
-
 
 # ---------------------------------------------------------------------------
 # GET /api/replay/{case_id} — recorded event stream (offline fallback)
@@ -260,7 +252,7 @@ async def api_replay(case_id: str):
         for ev in events:
             ev["replay"] = True
             yield f"data: {json.dumps(ev)}\n\n"
-            await asyncio.sleep(0.3)  # pace the replay
+            await asyncio.sleep(0.3)
 
     return StreamingResponse(
         replay_generator(),
@@ -271,9 +263,8 @@ async def api_replay(case_id: str):
         },
     )
 
-
 # ---------------------------------------------------------------------------
-# Static serving — GET / → static/index.html
+# Static serving
 # ---------------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
@@ -281,83 +272,76 @@ async def index():
     index_file = STATIC_DIR / "index.html"
     if index_file.exists():
         return HTMLResponse(index_file.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>ORBIT — Evidence Board loading...</h1><p>Run P10 to build the console.</p>")
-
+    return HTMLResponse("<h1>ORBIT — Evidence Board loading...</h1>")
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-
 # ---------------------------------------------------------------------------
-# Investigation runner — emits SSE events to connected streams
+# Investigation runner — FIX: sentinel now sent after case_closed in ALL paths
 # ---------------------------------------------------------------------------
 
 async def _run_investigation(case: CasePayload, resume: dict | None = None):
-    """Run the graph and push each SSE event to connected stream clients."""
+    """Run the graph and push each SSE event to connected stream clients.
+
+    FIX: The None sentinel (SSE stream close) is sent:
+    - After case_closed in the initial run
+    - After case_closed in the resume run
+    - After any error
+    - NOT after approval_required (keeps stream open for the resume call)
+    """
     case_id = case.case_id
     queue = _streams.get(case_id)
-
-    # Record for replay
     events: list[dict] = []
+    last_event_name: str | None = None
 
     try:
         async for ev in investigate(case, resume=resume):
             events.append(ev)
-            # Store in case info
+            last_event_name = ev.get("event")
             if case_id in _cases:
                 _cases[case_id]["events"].append(ev)
-            # Push to SSE stream
             if queue:
                 await queue.put(ev)
-            # Update status based on events
             if case_id in _cases:
-                if ev.get("event") == "case_closed":
+                if last_event_name == "case_closed":
                     _cases[case_id]["status"] = "closed"
-                elif ev.get("event") == "approval_required":
+                elif last_event_name == "approval_required":
                     _cases[case_id]["status"] = "awaiting_approval"
     except Exception as exc:
         error_ev = {"event": "error", "where": "server", "message": str(exc), "degraded": True}
         events.append(error_ev)
+        last_event_name = "error"
         if queue:
             await queue.put(error_ev)
         log.error(f"Investigation {case_id} failed: {exc}")
     finally:
-        # Signal stream end (for fresh runs only, not approval resumes)
-        if queue and resume is None:
-            pass  # keep stream open for approval resume
-        elif queue and resume is not None:
-            await queue.put(None)  # sentinel: stream done
+        # Send sentinel to close SSE — but NOT on approval_required
+        # (stream must stay open so the browser receives resume events)
+        if queue and last_event_name != "approval_required":
+            await queue.put(None)
 
-        # Save replay
-        try:
-            replay_file = REPLAY_DIR / f"{case_id}.json"
-            # Merge with existing if resuming
-            if resume and replay_file.exists():
-                existing = json.loads(replay_file.read_text(encoding="utf-8"))
-                events = existing + events
-            replay_file.write_text(json.dumps(events, default=str), encoding="utf-8")
-        except Exception as exc:
-            log.warning(f"Failed to save replay for {case_id}: {exc}")
-
+    # Save replay file (merge with existing on resume)
+    try:
+        replay_file = REPLAY_DIR / f"{case_id}.json"
+        if resume and replay_file.exists():
+            existing = json.loads(replay_file.read_text(encoding="utf-8"))
+            events = existing + events
+        replay_file.write_text(json.dumps(events, default=str), encoding="utf-8")
+    except Exception as exc:
+        log.warning(f"Failed to save replay for {case_id}: {exc}")
 
 # ---------------------------------------------------------------------------
-# Startup — background tasks: Gmail poller + Telegram callback poll
+# Startup — background tasks
 # ---------------------------------------------------------------------------
 
 @app.on_event("startup")
 async def startup():
-    # Rebuild DBs to ensure clean state
     rebuild_dbs()
     log.info("Enterprise DBs rebuilt")
-
-    # Start Gmail poller in background
     asyncio.create_task(_start_gmail_poller())
-
-    # Start Telegram callback poller in background
     asyncio.create_task(_start_telegram_poller())
-
     log.info("ORBIT server started — http://localhost:8000")
-
 
 async def _start_gmail_poller():
     """Background: poll Gmail for trigger emails → create pending cases + alert."""
@@ -377,7 +361,6 @@ async def _start_gmail_poller():
         await poll_inbox(on_email, interval=10)
     except Exception as exc:
         log.warning(f"Gmail poller disabled: {exc}")
-
 
 async def _start_telegram_poller():
     """Background: poll Telegram for INVESTIGATE button presses → fire investigations."""

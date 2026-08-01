@@ -50,18 +50,12 @@ from playbook import eliminations_for, hypotheses_for, load_playbook, stamp_rule
 
 _log = logging.getLogger("orbit.graph")
 
-
 def _emit(payload: dict) -> None:
-    """Emit an SSE event; silently skip when called outside a graph runtime.
-
-    Unit tests invoke nodes directly (no stream context), while the real graph
-    streams via get_stream_writer — both must work.
-    """
+    """Emit an SSE event; silently skip when called outside a graph runtime."""
     try:
         get_stream_writer()(payload)
     except RuntimeError:
         pass
-
 
 class InvestigationState(TypedDict):
     case: CasePayload
@@ -70,13 +64,12 @@ class InvestigationState(TypedDict):
     evidence: Annotated[list[Evidence], operator.add]
     verdict: Verdict | None
     challenge: ChallengeResult | None
-    approved: bool | None            # set by interrupt() resume
+    approved: bool | None
     execution: ExecutionResult | None
     actions: Annotated[list[ActionResult], operator.add]
     trace: Annotated[list[str], operator.add]
     loop_count: int
     started_at: float
-
 
 # ---------------------------------------------------------------------------
 # Router — playbook-driven hypothesis generation
@@ -85,10 +78,8 @@ class InvestigationState(TypedDict):
 class _CaseTypeChoice(BaseModel):
     case_type: str
 
-
 class _HypothesisRationales(BaseModel):
-    rationales: list[dict[str, str]]   # [{id, rationale}]
-
+    rationales: list[dict[str, str]]
 
 _ROUTER_CLASSIFY_SYSTEM = (
     "You are the router of an operations-detective system. Given a customer "
@@ -104,10 +95,8 @@ _ROUTER_CLASSIFY_SYSTEM = (
     )
 )
 
-
 async def router_node(state: InvestigationState) -> dict:
-    """Classify the case type (one cheap LLM call), then load playbook
-    hypotheses and have the LLM write one rationale per hypothesis."""
+    """Classify the case type, then load playbook hypotheses + rationales."""
     case = state["case"]
     llm = get_llm()
     classify = llm.with_structured_output(_CaseTypeChoice)
@@ -120,7 +109,7 @@ async def router_node(state: InvestigationState) -> dict:
     )
     case_type = choice.case_type
     if case_type not in load_playbook()["case_types"]:
-        case_type = "shipment_delay"   # hard fallback: never crash the demo
+        case_type = "shipment_delay"
 
     hypotheses = hypotheses_for(case_type)
     rationale_llm = get_llm().with_structured_output(_HypothesisRationales)
@@ -173,16 +162,12 @@ async def router_node(state: InvestigationState) -> dict:
         "trace": [f"> router: case type={case_type}, {len(enriched)} hypotheses"] + skipped,
     }
 
-
 # ---------------------------------------------------------------------------
 # Fan-out — Send() one task per non-eliminated wired hypothesis
 # ---------------------------------------------------------------------------
 
 _SYNTH_KEYS = ("case_type", "hypotheses", "evidence", "verdict", "challenge", "started_at")
 
-# Playbook investigator name → its node. h_dispatch_failure is ALSO checked
-# against the delhivery shipment record (a dispatch fact is visible in two
-# systems), so it gets a second Send.
 _WIRED: dict[str, str] = {
     "gst": "investigator_gst",
     "inventory": "investigator_inventory",
@@ -193,14 +178,8 @@ _EXTRA_CHECK: dict[str, str] = {
     "h_dispatch_failure": "investigator_delhivery",
 }
 
-
 def fan_out(state: InvestigationState) -> list[Send]:
-    """Dispatch one investigator task per hypothesis not yet ruled out.
-
-    A Send payload becomes the spawned task's state (it does NOT see the
-    parent's channels), so when nothing is left to dispatch the synthesizer
-    is spawned with the exact snapshot it reads — the pipeline never strands.
-    """
+    """Dispatch one investigator task per hypothesis not yet ruled out."""
     eliminated = {
         hid for ev in state.get("evidence", []) for hid in ev.eliminates
     }
@@ -218,19 +197,11 @@ def fan_out(state: InvestigationState) -> list[Send]:
         sends.append(Send("synthesizer", {k: state.get(k) for k in _SYNTH_KEYS}))
     return sends
 
-
 # ---------------------------------------------------------------------------
-# Investigator wrappers — P3/P5 node modules + SSE emissions (modules untouched)
+# Investigator wrappers
 # ---------------------------------------------------------------------------
 
 def _make_investigator_wrapper(investigator: str, trace_label: str, node):
-    """Wrap an investigator node: SSE start/evidence events + trace lines.
-
-    Evidence.source is normalized to the canonical tool name — the LLM's
-    free-form label varies run to run ("GST Portal" vs "query_gst"), while the
-    system actually queried is the deterministic ground truth.
-    """
-
     async def wrapper(state: InvestigationState) -> dict:
         hypothesis = state["hypothesis"]
         _emit(
@@ -239,7 +210,7 @@ def _make_investigator_wrapper(investigator: str, trace_label: str, node):
         )
         try:
             result = await node(state)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             _log.warning("investigator %s failed (degraded): %s", investigator, exc)
             degraded = Evidence(
                 source=investigator,
@@ -267,7 +238,6 @@ def _make_investigator_wrapper(investigator: str, trace_label: str, node):
 
     return wrapper
 
-
 _investigator_gst = _make_investigator_wrapper("query_gst", "gst", gst_investigator.node)
 _investigator_inventory = _make_investigator_wrapper(
     "query_inventory", "inventory", inventory_investigator.node
@@ -282,13 +252,11 @@ _investigator_delhivery = _make_investigator_wrapper(
     "query_delhivery", "delhivery", delhivery_investigator.node
 )
 
-
 # ---------------------------------------------------------------------------
-# Stamp-rule evaluator — deterministic mini-language for playbook conditions
+# Stamp-rule evaluator
 # ---------------------------------------------------------------------------
 
 _ATOM_RE = re.compile(r"^\s*([a-z_0-9]+)\s*(=|!=|>|<)\s*([^\s]+)\s*$")
-
 
 def _truthiness(text: str) -> bool:
     text = text.strip()
@@ -301,53 +269,39 @@ def _truthiness(text: str) -> bool:
     except ValueError:
         return False
 
-
 def evaluate_condition(condition: str, facts: dict) -> bool:
-    """Evaluate a playbook `if` condition against evidence facts.
+    condition = condition.strip()
+    if " or " in condition:
+        return any(evaluate_condition(p, facts) for p in condition.split(" or "))
+    if " and " in condition:
+        return all(evaluate_condition(p, facts) for p in condition.split(" and "))
+    if condition.startswith("not "):
+        return not evaluate_condition(condition[4:], facts)
 
-    Supports: and / or / not, and atoms of the forms key=value, key!=value,
-    key>N, key<N, or bare key (truthy). Unknown keys → False. Deterministic.
-    """
-    expr = condition.strip()
-    if not expr:
-        return True
-    while True:
-        m = re.search(r"\bnot\s+([a-z_0-9]+)\b", expr)
-        if not m:
-            break
-        expr = expr[: m.start()] + str(not bool(facts.get(m.group(1)))) + expr[m.end():]
+    def _eval_part(part: str) -> bool:
+        part = part.strip().strip("()")
+        m = _ATOM_RE.match(part)
+        if m:
+            key, op, value = m.groups()
+            actual = facts.get(key)
+            if actual is None:
+                return False
+            if op in ("=", "!="):
+                equal = str(actual).lower() == value.strip("\"'").lower()
+                return equal if op == "=" else not equal
+            try:
+                a, b = float(actual), float(value)
+            except (TypeError, ValueError):
+                return False
+            return {"<": a < b, ">": a > b}[op]
+        bare = part.strip().strip("()")
+        if re.match(r"^[a-z_0-9]+$", bare):
+            return _truthiness(str(facts.get(bare)))
+        return False
 
-    for token in re.split(r"\s+or\s+", expr, flags=re.IGNORECASE):
-        parts = re.split(r"\s+and\s+", token, flags=re.IGNORECASE)
-        if all(_atom(part, facts) for part in parts):
-            return True
-    return False
-
-
-def _atom(part: str, facts: dict) -> bool:
-    part = part.strip().strip("()")
-    m = _ATOM_RE.match(part)
-    if m:
-        key, op, value = m.groups()
-        actual = facts.get(key)
-        if actual is None:
-            return False
-        if op in ("=", "!="):
-            equal = str(actual).lower() == value.strip("\"'").lower()
-            return equal if op == "=" else not equal
-        try:
-            a, b = float(actual), float(value)
-        except (TypeError, ValueError):
-            return False
-        return {"<": a < b, ">": a > b}[op]
-    bare = part.strip().strip("()")
-    if re.match(r"^[a-z_0-9]+$", bare):
-        return _truthiness(str(facts.get(bare)))
-    return False
-
+    return _eval_part(condition)
 
 def facts_from_evidence(evidence: list[Evidence]) -> dict:
-    """Flatten evidence raw records into condition facts (deterministic)."""
     facts: dict = {}
     for ev in evidence:
         raw = ev.raw or {}
@@ -370,18 +324,16 @@ def facts_from_evidence(evidence: list[Evidence]) -> dict:
                 pass
     return facts
 
-
 # ---------------------------------------------------------------------------
-# Synthesizer — deterministic rules ONLY, confidence NEVER from the LLM
+# Synthesizer
 # ---------------------------------------------------------------------------
 
 def _culprit_id(evidence: list[Evidence], hypothesis_ids: list[str]) -> str | None:
-    for hid in hypothesis_ids:          # playbook order = priority
+    for hid in hypothesis_ids:
         for ev in evidence:
             if ev.found and hid in ev.supports:
                 return hid
     return None
-
 
 def synthesizer_node(state: InvestigationState) -> dict:
     """Deterministic: culprit, confidence (exact TRD §5 formula), stamps."""
@@ -422,7 +374,7 @@ def synthesizer_node(state: InvestigationState) -> dict:
         evidence_trail=evidence,
         ruled_out=eliminated,
         portal_verdicts=portal_verdicts,
-        wall_clock_s=round(time.time() - state["started_at"], 2),   # HONEST clock
+        wall_clock_s=round(time.time() - state["started_at"], 2),
     )
     if state.get("challenge") is None:
         for portal, stamp in portal_verdicts.items():
@@ -447,18 +399,8 @@ def synthesizer_node(state: InvestigationState) -> dict:
     ]
     return {"verdict": verdict, "trace": trace}
 
-
 def route_after_synthesis(state: InvestigationState) -> Literal["challenger", "router", "approve", "end"]:
-    """Challenge verdicts: a refuted challenge re-opens the investigation
-    exactly once (loop_count guards against cycles — max 1 re-open per TRD
-    §5); a survived challenge proceeds to approval; with no challenge the
-    confidence gate applies: >= 0.8 → challenger, else one re-investigation
-    loop max (loop_count advanced by the router), then end.
-
-    Threshold lowered from TRD's 0.9 by team decision 2026-08-01 (NOTES #3):
-    with 4 hypotheses and the dispatched investigators, #402 scores 0.85 — the
-    0.9 bar would skip the Challenger beat entirely.
-    """
+    """Threshold: 0.8 per team decision (NOTES #3)."""
     if state.get("challenge") is not None:
         if state["challenge"].survived:
             return "approve"
@@ -472,9 +414,8 @@ def route_after_synthesis(state: InvestigationState) -> Literal["challenger", "r
         return "router"
     return "end"
 
-
 # ---------------------------------------------------------------------------
-# Approval gate — interrupt() before any execution (H6 GATE)
+# Approval gate — interrupt() before any execution
 # ---------------------------------------------------------------------------
 
 def approval_gate_node(state: InvestigationState) -> dict:
@@ -509,14 +450,11 @@ def approval_gate_node(state: InvestigationState) -> dict:
         ],
     }
 
-
 def after_approval(state: InvestigationState) -> Literal["executor", "close_case"]:
-    """Approved → execute the fix; rejected → close without touching anything."""
     return "executor" if state["approved"] else "close_case"
 
-
 # ---------------------------------------------------------------------------
-# Executor — renews the e-way bill, re-reads to verify (honest, no claims)
+# Executor — renews the e-way bill, re-reads to verify
 # ---------------------------------------------------------------------------
 
 def executor_node(state: InvestigationState) -> dict:
@@ -548,25 +486,58 @@ def executor_node(state: InvestigationState) -> dict:
         "trace": [f"> executor: {execution.action}, verified={execution.verified}"],
     }
 
+# ---------------------------------------------------------------------------
+# Action drafter — FIX: actually calls the real action modules
+# ---------------------------------------------------------------------------
+
+async def action_drafter_node(state: InvestigationState) -> dict:
+    """Wire P8: calls telegram, gmail_drafter, eta_recalc — graceful on any failure."""
+    from actions.eta_recalc import recalc_eta as _recalc_eta
+    from actions.gmail_drafter import create_buyer_draft
+    from actions.telegram_bot import send_manager_alert
+
+    case = state["case"]
+    verdict = state.get("verdict")
+    actions: list[ActionResult] = []
+
+    # 1. Telegram verdict alert (internal — auto-send)
+    try:
+        if verdict:
+            tg_result = await send_manager_alert(verdict, case)
+        else:
+            tg_result = ActionResult(type="telegram", status="failed", error="no verdict")
+    except Exception as exc:
+        tg_result = ActionResult(type="telegram", status="failed", error=f"telegram: {exc}")
+    actions.append(tg_result)
+    _emit({"event": "action_done", "action": tg_result.model_dump()})
+
+    # 2. Gmail draft reply to buyer (external — approval-gated, draft only)
+    try:
+        if case.thread_id:
+            gm_result = await create_buyer_draft(verdict, case, case.thread_id)
+        else:
+            # No thread_id (manual/CLI trigger) — still create a standalone draft
+            gm_result = await create_buyer_draft(verdict, case, None)
+    except Exception as exc:
+        gm_result = ActionResult(type="gmail_draft", status="failed", error=f"gmail: {exc}")
+    actions.append(gm_result)
+    _emit({"event": "action_done", "action": gm_result.model_dump()})
+
+    # 3. ETA recalculation
+    try:
+        eta_result = _recalc_eta(case)
+    except Exception as exc:
+        eta_result = ActionResult(type="eta_recalc", status="failed", error=f"eta: {exc}")
+    actions.append(eta_result)
+    _emit({"event": "action_done", "action": eta_result.model_dump()})
+
+    return {
+        "actions": actions,
+        "trace": ["> drafter: telegram + gmail_draft + eta_recalc executed"],
+    }
 
 # ---------------------------------------------------------------------------
-# Action drafter — drafts only; senders wire in P8
-# ---------------------------------------------------------------------------
-
-def action_drafter_node(state: InvestigationState) -> dict:
-    case_id = state["case"].case_id
-    actions = [
-        ActionResult(type="telegram", status="drafted", ref=f"telegram-alert-{case_id}"),
-        ActionResult(type="gmail_draft", status="drafted", ref=f"gmail-draft-{case_id}"),
-        ActionResult(type="eta_recalc", status="done", ref=None),
-    ]
-    for action in actions:
-        _emit({"event": "action_done", "action": action.model_dump()})
-    return {"actions": actions, "trace": ["> drafter: 3 actions drafted (senders in P8)"]}
-
-
-# ---------------------------------------------------------------------------
-# Close — honest wall clock, cost not yet metered
+# Close case
 # ---------------------------------------------------------------------------
 
 def close_case_node(state: InvestigationState) -> dict:
@@ -578,9 +549,8 @@ def close_case_node(state: InvestigationState) -> dict:
     )
     return {}
 
-
 # ---------------------------------------------------------------------------
-# Topology + investigate() — the P5 entry point
+# Topology + investigate()
 # ---------------------------------------------------------------------------
 
 _checkpointer = MemorySaver()
@@ -592,9 +562,7 @@ _ROUTE_AFTER_SYNTHESIS_MAP = {
     "end": "close_case",
 }
 
-
 def build_graph():
-    """Compile the full investigation graph with a checkpointer (needed by interrupt())."""
     graph = StateGraph(InvestigationState)
     graph.add_node("router", router_node)
     graph.add_node("investigator_gst", _investigator_gst)
@@ -631,20 +599,25 @@ def build_graph():
     graph.add_edge("close_case", END)
     return graph.compile(checkpointer=_checkpointer)
 
-
 _GRAPH = build_graph()
-
 
 async def investigate(case: CasePayload, resume: dict | None = None):
     """Run (or resume) an investigation, yielding SSE events as they happen.
 
-    Fresh runs start at the router; `resume` replays the interrupt() answer
-    on the same thread. Events follow contracts.SSE_EVENTS payloads exactly.
+    FIX: Replaced _checkpointer.delete_thread() (doesn't exist on MemorySaver)
+    with a safe storage clear that works across LangGraph versions.
     """
-    thread_id = f"orbit-{case.case_id}"          # stable: resume must find the same thread
+    thread_id = f"orbit-{case.case_id}"
     config = {"configurable": {"thread_id": thread_id}}
     if resume is None:
-        _checkpointer.delete_thread(thread_id)   # fresh run (safe on missing threads)
+        # FIX: safely clear stale checkpoint — delete_thread() doesn't exist on MemorySaver
+        try:
+            if hasattr(_checkpointer, 'storage'):
+                _checkpointer.storage.pop(thread_id, None)
+            if hasattr(_checkpointer, 'writes'):
+                _checkpointer.writes.pop(thread_id, None)
+        except Exception:
+            pass
         yield {"event": "case_ingested", "case_id": case.case_id, "order_id": case.order_id,
                "symptom": case.symptom, "source": case.source}
         input_state = {"case": case, "evidence": [], "trace": [], "actions": [],

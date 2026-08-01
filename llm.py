@@ -22,7 +22,9 @@ import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
-load_dotenv()
+# .env is the source of truth — override stale inherited values (e.g. a
+# session-scoped env var that outlives the registry entry that created it).
+load_dotenv(override=True)
 
 _DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 _DEFAULT_MODEL = "deepseek-ai/deepseek-v4-flash"

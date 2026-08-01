@@ -37,7 +37,9 @@ from actions._common import eway_bill_culprit
 from actions.eta_recalc import recalc_eta
 from contracts import ActionResult, CasePayload, Verdict
 
-load_dotenv()
+# .env is the source of truth — override stale inherited values (e.g. a
+# session-scoped env var that outlives the registry entry that created it).
+load_dotenv(override=True)
 
 _log = logging.getLogger("orbit.telegram")
 _CB_FAILURES_SEEN: set[str] = set()

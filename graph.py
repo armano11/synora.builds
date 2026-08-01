@@ -12,6 +12,7 @@ event vocabulary (contracts.SSE_EVENTS).
 from __future__ import annotations
 
 import json
+import logging
 import operator
 import re
 import sqlite3
@@ -46,6 +47,8 @@ from investigators import transport as transport_investigator
 from investigators import warehouse as warehouse_investigator
 from llm import ainvoke_with_retry, get_llm
 from playbook import eliminations_for, hypotheses_for, load_playbook, stamp_rules_for
+
+_log = logging.getLogger("orbit.graph")
 
 
 def _emit(payload: dict) -> None:
@@ -234,7 +237,24 @@ def _make_investigator_wrapper(investigator: str, trace_label: str, node):
             {"event": "investigator_start", "investigator": investigator,
              "hypothesis_id": hypothesis.id}
         )
-        result = await node(state)
+        try:
+            result = await node(state)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("investigator %s failed (degraded): %s", investigator, exc)
+            degraded = Evidence(
+                source=investigator,
+                found=False,
+                detail=f"investigator unavailable: {type(exc).__name__}",
+                supports=[],
+                eliminates=[],
+            )
+            _emit(
+                {"event": "evidence_found", "investigator": investigator,
+                 "evidence": degraded.model_dump(),
+                 "trace_line": f"> {trace_label}: DEGRADED — {exc}"}
+            )
+            return {"evidence": [degraded],
+                    "trace": [f"> {trace_label}: DEGRADED — {exc}"]}
         trace = []
         for ev in result["evidence"]:
             ev.source = investigator
@@ -429,15 +449,20 @@ def synthesizer_node(state: InvestigationState) -> dict:
 
 
 def route_after_synthesis(state: InvestigationState) -> Literal["challenger", "router", "approve", "end"]:
-    """challenge exists → approve; confidence >= 0.8 → challenger; else one
-    re-investigation loop max (loop_count advanced by the router), then end.
+    """Challenge verdicts: a refuted challenge re-opens the investigation
+    exactly once (loop_count guards against cycles — max 1 re-open per TRD
+    §5); a survived challenge proceeds to approval; with no challenge the
+    confidence gate applies: >= 0.8 → challenger, else one re-investigation
+    loop max (loop_count advanced by the router), then end.
 
     Threshold lowered from TRD's 0.9 by team decision 2026-08-01 (NOTES #3):
     with 4 hypotheses and the dispatched investigators, #402 scores 0.85 — the
     0.9 bar would skip the Challenger beat entirely.
     """
     if state.get("challenge") is not None:
-        return "approve"
+        if state["challenge"].survived:
+            return "approve"
+        return "router" if state.get("loop_count", 0) < 1 else "end"
     confidence = (state.get("verdict") or Verdict(
         root_cause="", confidence=0.0, portal_verdicts={}, wall_clock_s=0.0
     )).confidence

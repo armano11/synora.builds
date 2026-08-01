@@ -175,6 +175,41 @@ def test_challenge_bonus_brings_402_to_091():
     assert verdict.confidence == pytest.approx(0.91)
 
 
+def test_route_refuted_challenge_reopens_investigation_once():
+    """P7: a refuted verdict re-opens the investigation exactly once."""
+    state = _state()
+    state["loop_count"] = 0
+    state["challenge"] = ChallengeResult(
+        attack="transport breakdown happened first?",
+        evidence_checked=["transport.bookings"],
+        survived=False, confidence_delta=0.0, reasoning="refuted",
+    )
+    assert route_after_synthesis(state) == "router"
+
+
+def test_route_second_refutation_ends_case():
+    """P7: a second refuted synthesis ends the case (no cycles)."""
+    state = _state()
+    state["loop_count"] = 1
+    state["challenge"] = ChallengeResult(
+        attack="transport breakdown happened first?",
+        evidence_checked=["transport.bookings"],
+        survived=False, confidence_delta=0.0, reasoning="refuted",
+    )
+    assert route_after_synthesis(state) == "end"
+
+
+def test_route_survived_challenge_goes_to_approval():
+    """P7: a survived challenge proceeds to the approval gate."""
+    state = _state()
+    state["challenge"] = ChallengeResult(
+        attack="transport breakdown happened first?",
+        evidence_checked=["transport.bookings"],
+        survived=True, confidence_delta=0.06, reasoning="checked",
+    )
+    assert route_after_synthesis(state) == "approve"
+
+
 def test_route_low_confidence_back_to_router_once():
     state = _state()
     state["verdict"] = Verdict(root_cause="x", confidence=0.5,

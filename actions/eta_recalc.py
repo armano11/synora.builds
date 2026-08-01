@@ -11,8 +11,9 @@ never touches a database and never reads the wall clock.
 #    unit-tested, so drift fails the suite loudly instead of misdelivering.
 # 2. Date arithmetic breaks (timedelta misuse, non-date SCENARIO_TODAY) —
 #    caught and returned as a failed ActionResult.
-# 3. ActionResult contract drift (frozen schema changes) — construction
-#    failure is caught and returned as a failed ActionResult.
+# 3. ActionResult contract drift (frozen schema changes) — a broken schema
+#    is a deployment-time error surfaced by the test suite, not something a
+#    runtime handler can faithfully report.
 # ---------------------------------------------------------------------------
 """
 

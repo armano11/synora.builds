@@ -7,7 +7,9 @@ The Bot is constructed lazily inside send_manager_alert.
 
 Message format (P6 spec): case ID, order ID, root cause, confidence,
 actions (derived honestly from the verdict), portal stamps as supporting
-notes, and the new ETA from recalc_eta(case).
+notes, and the new ETA from recalc_eta(case) — but only on the e-way
+renewal path, and never a "None" ETA: when recalc fails the line reads
+"New ETA: pending".
 
 # ---------------------------------------------------------------------------
 # FAILURE MODES (each handled explicitly):
@@ -17,6 +19,8 @@ notes, and the new ETA from recalc_eta(case).
 #    caught, returned as failed ActionResult.
 # 3. send_message raises (network, Telegram API error, rate limit) —
 #    caught, returned as failed ActionResult with the reason.
+# 4. recalc_eta fails — the alert still sends; the ETA line honestly says
+#    "pending" instead of embedding a None ref.
 # ---------------------------------------------------------------------------
 """
 
@@ -26,27 +30,38 @@ import os
 
 from telegram import Bot
 
+from actions._common import eway_bill_culprit
 from actions.eta_recalc import recalc_eta
 from contracts import ActionResult, CasePayload, Verdict
 
 
 def _actions_line(verdict: Verdict) -> str:
     """Derive the execution status honestly from the verdict's root cause."""
-    if verdict.root_cause.endswith("h_eway_bill_expired"):
+    if eway_bill_culprit(verdict):
         return "renew e-way bill (in progress)"
     return "no execution (rejected)"
 
 
 def _build_message(verdict: Verdict, case: CasePayload) -> str:
-    """The P6-specified alert text: case/order, cause, confidence, actions, ETA."""
+    """The P6-specified alert text: case/order, cause, confidence, actions, ETA.
+
+    The ETA line is only included on the e-way renewal path (for other
+    branches the alert would contradict its own "rejected" actions line),
+    and a failed recalc renders as "New ETA: pending" — never "None".
+    """
     lines = [
         f"Case {case.case_id} — Order #{case.order_id}",
         f"Root cause: {verdict.root_cause}",
         f"Confidence: {verdict.confidence:.0%}",
         "",
         f"Actions: {_actions_line(verdict)}",
-        f"New ETA: {recalc_eta(case).ref}",
     ]
+    if eway_bill_culprit(verdict):
+        eta = recalc_eta(case)
+        if eta.status == "done":
+            lines.append(f"New ETA: {eta.ref}")
+        else:
+            lines.append("New ETA: pending")
     if verdict.portal_verdicts:
         stamps = ", ".join(
             f"{portal} {stamp.verdict}"

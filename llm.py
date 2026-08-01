@@ -31,7 +31,8 @@ _DEFAULT_FALLBACK_MODEL = "mistralai/mistral-medium-3.5-128b"
 
 def _api_key() -> str | None:
     return (
-        os.environ.get("DEEPSEEK_API_KEY")
+        os.environ.get("MISTRAL_API_KEY")
+        or os.environ.get("DEEPSEEK_API_KEY")
         or os.environ.get("OPENAI_API_KEY")
         or os.environ.get("LLM_API_KEY")
     )

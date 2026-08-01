@@ -133,17 +133,16 @@ async def api_stream(case_id: str):
             await queue.put(None)
 
     async def event_generator():
-        try:
-            while True:
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    if event is None:  # sentinel — stream done
-                        return
-                    yield f"data: {json.dumps(event)}\n\n"
-                except asyncio.TimeoutError:
-                    yield f": keepalive\n\n"
-                except asyncio.CancelledError:
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                if event is None:  # sentinel — stream done
                     return
+                yield f"data: {json.dumps(event)}\n\n"
+            except asyncio.TimeoutError:
+                yield f": keepalive\n\n"
+            except asyncio.CancelledError:
+                return
 
     return StreamingResponse(
         event_generator(),

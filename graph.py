@@ -514,10 +514,10 @@ async def action_drafter_node(state: InvestigationState) -> dict:
     # 2. Gmail draft reply to buyer (external — approval-gated, draft only)
     try:
         if case.thread_id:
-            gm_result = await create_buyer_draft(verdict, case, case.thread_id)
+            gm_result = create_buyer_draft(verdict, case, case.thread_id)
         else:
             # No thread_id (manual/CLI trigger) — still create a standalone draft
-            gm_result = await create_buyer_draft(verdict, case, None)
+            gm_result = create_buyer_draft(verdict, case, None)
     except Exception as exc:
         gm_result = ActionResult(type="gmail_draft", status="failed", error=f"gmail: {exc}")
     actions.append(gm_result)

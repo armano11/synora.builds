@@ -196,13 +196,52 @@ async def send_initial_alert(case: CasePayload) -> ActionResult:
         return ActionResult(type="telegram", status="failed", error=f"Telegram send failed: {exc}")
 
 
-async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
-    """Poll get_updates forever; on "investigate:<case_id>" press, run the flow.
+async def send_verdict_alert(verdict: Verdict, case: CasePayload) -> ActionResult:
+    """Send investigation report to Telegram with Approve/Reject buttons.
 
-    Answers the callback, rewrites the message, then awaits
-    on_investigate(case_id). Offset always advances past the batch max.
-    Missing TELEGRAM_BOT_TOKEN -> logged once, failed dict (no bot to poll).
-    Every other failure is logged once and polling continues.
+    Called after verdict_locked, before the approval gate.
+    The manager can approve/reject directly from Telegram.
+    """
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return ActionResult(type="telegram", status="failed", error="Telegram env not configured")
+    try:
+        bot = Bot(token)
+    except Exception as exc:
+        return ActionResult(type="telegram", status="failed", error=f"Telegram bot failed: {exc}")
+
+    root_cause = verdict.root_cause.rsplit(".", 1)[-1].replace("_", " ")
+    conf_pct = f"{int(verdict.confidence * 100)}%"
+    stamps_text = ""
+    for portal, stamp in verdict.portal_verdicts.items():
+        stamps_text += f"  {portal}: {stamp.verdict} — {stamp.reason}\n"
+
+    text = (
+        f"📋 INVESTIGATION REPORT — Order #{case.order_id}\n"
+        f"Root Cause: {root_cause}\n"
+        f"Confidence: {conf_pct}\n\n"
+        f"Portal Verdicts:\n{stamps_text}\n"
+        f"Approve to execute the fix, or reject to close without action."
+    )
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Approve & Fix", callback_data=f"approve:{case.case_id}"),
+        InlineKeyboardButton("❌ Reject", callback_data=f"reject:{case.case_id}"),
+    ]])
+    try:
+        msg = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        return ActionResult(type="telegram", status="sent", ref=str(msg.message_id))
+    except Exception as exc:
+        return ActionResult(type="telegram", status="failed", error=f"Telegram verdict alert failed: {exc}")
+
+
+async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
+    """Poll get_updates forever; handle investigate: and approve: callback buttons.
+
+    Buttons:
+    - investigate:<case_id> → starts investigation via on_investigate
+    - approve:<case_id> → calls on_approve(case_id, True)
+    - reject:<case_id> → calls on_approve(case_id, False)
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -210,7 +249,7 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
         return {"status": "failed", "error": "Telegram env not configured"}
     try:
         bot = Bot(token)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _log_callback_failure(f"Telegram bot failed: {exc}")
         return {"status": "failed", "error": f"Telegram bot failed: {exc}"}
 
@@ -232,8 +271,32 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
                             chat_id=cb.message.chat.id,
                         )
                         await on_investigate(case_id)
-                    except Exception as exc:  # noqa: BLE001
+                    except Exception as exc:
                         _log_callback_failure(f"investigate {case_id} failed: {exc}")
-        except Exception as exc:  # noqa: BLE001
+                elif cb and getattr(cb, "data", "") and cb.data.startswith("approve:"):
+                    case_id = cb.data.split(":", 1)[1]
+                    try:
+                        await bot.answer_callback_query(callback_query_id=cb.id)
+                        await bot.edit_message_text(
+                            "✅ Approved — executing fix…",
+                            message_id=cb.message.message_id,
+                            chat_id=cb.message.chat.id,
+                        )
+                        await on_investigate(case_id, is_approval=True, approved=True)
+                    except Exception as exc:
+                        _log_callback_failure(f"approve {case_id} failed: {exc}")
+                elif cb and getattr(cb, "data", "") and cb.data.startswith("reject:"):
+                    case_id = cb.data.split(":", 1)[1]
+                    try:
+                        await bot.answer_callback_query(callback_query_id=cb.id)
+                        await bot.edit_message_text(
+                            "❌ Rejected — no execution",
+                            message_id=cb.message.message_id,
+                            chat_id=cb.message.chat.id,
+                        )
+                        await on_investigate(case_id, is_approval=True, approved=False)
+                    except Exception as exc:
+                        _log_callback_failure(f"reject {case_id} failed: {exc}")
+        except Exception as exc:
             _log_callback_failure(f"get_updates failed: {exc}")
         await asyncio.sleep(interval)

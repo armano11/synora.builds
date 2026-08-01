@@ -3,7 +3,27 @@
  * No AI slop. No gratuitous decoration. Every element earns its place.
  */
 
-/* ─── Scrollbar ─── */
+/* ─── CTA button ─── */
+.cta-btn {
+  background: #f5a623;
+  color: #0a0a0a;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.cta-btn:hover {
+  background: #ffb84d;
+  box-shadow: 0 0 12px rgba(245,166,35,0.3);
+}
+.cta-btn:active {
+  transform: scale(0.97);
+}
+
+/* ─── Command input ─── */
+.command-input {
+  outline: none;
+}
 .scrollbar-hide { scrollbar-width: none; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 

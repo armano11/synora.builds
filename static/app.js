@@ -621,6 +621,18 @@ async function loadCases() {
     const r = await fetch('/api/cases');
     const d = await r.json();
     renderCases(d.cases || []);
+
+    // Auto-connect to active case if we're not streaming
+    const active = (d.cases || []).find(c => c.status === 'active' || c.status === 'awaiting_approval');
+    if (active && !state.eventSource && active.case_id !== state.activeCaseId) {
+      state.activeCaseId = active.case_id;
+      state.startTime = Date.now();
+      setPhase('INVESTIGATING');
+      document.getElementById('confidence-section').classList.remove('hidden');
+      connectSSE(active.case_id);
+      toast('Auto-connected to active investigation', 'info');
+    }
+
     // Check for pending cases
     const pending = (d.cases || []).filter(c => c.status === 'pending');
     if (pending.length > 0 && !state.activeCaseId) {
@@ -638,10 +650,10 @@ function renderCases(cases) {
     return;
   }
   list.innerHTML = cases.map(c => {
-    const statusColor = c.status === 'closed' ? '#22c55e' : c.status === 'active' ? '#f5a623' : '#ffffff40';
+    const statusColor = c.status === 'closed' ? '#22c55e' : c.status === 'active' ? '#f5a623' : c.status === 'awaiting_approval' ? '#f5a623' : '#ffffff40';
     const conf = c.confidence ? Math.round(c.confidence * 100) + '%' : '';
     return `
-      <div class="case-item" data-case-id="${escHtml(c.case_id)}">
+      <div class="case-item" data-case-id="${escHtml(c.case_id)}" onclick="if('${c.status}'==='active'||'${c.status}'==='awaiting_approval'){state.activeCaseId='${escHtml(c.case_id)}';state.startTime=Date.now();connectSSE('${escHtml(c.case_id)}');}">
         <div class="flex items-center gap-1.5">
           <div class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${statusColor}"></div>
           <span class="font-mono text-[10px] text-white/60 truncate">#${escHtml(c.order_id)}</span>

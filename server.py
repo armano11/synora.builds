@@ -374,24 +374,38 @@ async def _start_gmail_poller():
         log.warning(f"Gmail poller disabled: {exc}")
 
 async def _start_telegram_poller():
-    """Background: poll Telegram for INVESTIGATE button presses → fire investigations."""
+    """Background: poll Telegram for button presses → trigger/resume investigations."""
     try:
         from actions.telegram_bot import poll_callbacks
 
-        async def on_investigate(case_id: str):
-            pending = get_pending_case(case_id)
-            if pending:
-                case = CasePayload(
-                    case_id=case_id,
-                    order_id=pending["order_id"],
-                    symptom="operations issue reported",
-                    source="email",
-                )
-                _register_case(case)
-                await _run_investigation(case)
+        async def on_callback(case_id: str, is_approval: bool = False, approved: bool = False):
+            if is_approval:
+                # Approval/rejection from Telegram verdict alert
+                pending = get_pending_case(case_id)
+                if pending or case_id in _cases:
+                    case = CasePayload(
+                        case_id=case_id,
+                        order_id=_cases.get(case_id, {}).get("order_id", "unknown"),
+                        symptom="operations issue reported",
+                        source="email",
+                    )
+                    _register_case(case)
+                    await _run_investigation(case, resume={"approved": approved})
             else:
-                log.warning(f"Telegram investigate: case {case_id} not found")
+                # INVESTIGATE button pressed
+                pending = get_pending_case(case_id)
+                if pending:
+                    case = CasePayload(
+                        case_id=case_id,
+                        order_id=pending["order_id"],
+                        symptom="operations issue reported",
+                        source="email",
+                    )
+                    _register_case(case)
+                    await _run_investigation(case)
+                else:
+                    log.warning(f"Telegram investigate: case {case_id} not found")
 
-        await poll_callbacks(on_investigate, interval=2)
+        await poll_callbacks(on_callback, interval=2)
     except Exception as exc:
         log.warning(f"Telegram poller disabled: {exc}")

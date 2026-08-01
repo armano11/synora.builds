@@ -503,14 +503,14 @@ def route_after_synthesis(state: InvestigationState) -> Literal["challenger", "r
 # Approval gate — interrupt() before any execution
 # ---------------------------------------------------------------------------
 
-def approval_gate_node(state: InvestigationState) -> dict:
-    """Read the honest pre-state, propose the fix, pause for human approval."""
+async def approval_gate_node(state: InvestigationState) -> dict:
+    """Read the honest pre-state, propose the fix, send Telegram verdict alert, pause for approval."""
     case = state["case"]
     culprit = state["verdict"].root_cause.rsplit(".", 1)[-1]
     before_gst = eq.query_gst(case.order_id)
     before_tally = eq.query_tally(case.order_id)
     before_transport = eq.query_transport(case.order_id)
-    
+
     # Build proposed action based on culprit
     _ACTIONS = {
         "h_eway_bill_expired": lambda: (
@@ -549,14 +549,21 @@ def approval_gate_node(state: InvestigationState) -> dict:
             {"license_expired": before_transport.get("license_expired", 0)}
         ),
     }
-    
+
     action_fn = _ACTIONS.get(culprit)
     if action_fn:
         proposed, before_payload = action_fn()
     else:
         proposed = f"Execute fix for {culprit}"
         before_payload = {"culprit": culprit}
-    
+
+    # Send Telegram verdict alert with Approve/Reject buttons
+    try:
+        from actions.telegram_bot import send_verdict_alert
+        await send_verdict_alert(state["verdict"], case)
+    except Exception as exc:
+        _log.warning(f"Telegram verdict alert failed: {exc}")
+
     payload = {
         "type": "approval_required",
         "proposed_action": proposed,

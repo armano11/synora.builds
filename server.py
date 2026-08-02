@@ -57,6 +57,8 @@ def _register_case(case: CasePayload, status: str = "active") -> dict:
         "order_id": case.order_id,
         "symptom": case.symptom,
         "source": case.source,
+        "sender": case.sender,
+        "summary": case.summary,
         "status": status,
         "started_at": time.time(),
         "events": [],
@@ -84,12 +86,13 @@ class ApproveRequest(BaseModel):
 async def api_investigate(req: InvestigateRequest):
     # Case-type-based injection
     from ingest.inject_email import CASE_SYMPTOMS, CASE_ORDERS
-    if req.case_type and req.case_type in CASE_SYMPTOMS:
-        order_id = req.order_id or CASE_ORDERS.get(req.case_type, "402")
-        symptom = req.symptom or CASE_SYMPTOMS[req.case_type]
-    else:
-        order_id = req.order_id or "501"
-        symptom = req.symptom or "payment held by bank"
+    order_id = req.order_id
+    if not order_id and req.case_type:
+        order_id = CASE_ORDERS.get(req.case_type)
+    if not order_id:
+        order_id = "501"
+    
+    symptom = req.symptom or CASE_SYMPTOMS.get(req.case_type, f"Operational issue reported for Order #{order_id}")
     
     case_id = f"manual-{order_id}-{uuid4().hex[:8]}"
     case = CasePayload(
@@ -227,6 +230,9 @@ async def api_cases():
             "order_id": info["order_id"],
             "status": info["status"],
             "source": info.get("source"),
+            "symptom": info.get("symptom"),
+            "sender": info.get("sender"),
+            "summary": info.get("summary"),
         })
 
     # Pending cases from DB
@@ -247,6 +253,8 @@ async def api_cases():
                     "order_id": row_dict["order_id"],
                     "status": "pending",
                     "created_at": row_dict.get("created_at"),
+                    "sender": row_dict.get("sender"),
+                    "summary": row_dict.get("summary"),
                 })
     except Exception:
         pass
@@ -336,6 +344,36 @@ async def _run_investigation(case: CasePayload, resume: dict | None = None):
             if case_id in _cases:
                 if last_event_name == "case_closed":
                     _cases[case_id]["status"] = "closed"
+                    try:
+                        from actions.sheets_logger import log_case_to_sheet
+                        case_info = dict(_cases[case_id])
+                        case_info["case_type"] = getattr(case, "intent", None) or getattr(case, "case_type", None)
+                        # Extract verdict and execution data from SSE events
+                        for logged_ev in reversed(events):
+                            ev_name = logged_ev.get("event")
+                            # verdict_locked has full verdict; verdict_draft has partial_root_cause
+                            if ev_name == "verdict_locked" and "root_cause" not in case_info:
+                                v = logged_ev.get("verdict", {})
+                                case_info["root_cause"] = v.get("root_cause")
+                                case_info["confidence"] = v.get("confidence")
+                            if ev_name == "verdict_draft" and "root_cause" not in case_info:
+                                case_info["root_cause"] = logged_ev.get("partial_root_cause")
+                            if ev_name == "execution_done" and "action" not in case_info:
+                                ex = logged_ev.get("execution", {})
+                                case_info["action"] = ex.get("action")
+                                if ex.get("before") and ex.get("after"):
+                                    before_str = ", ".join(f"{k}={v}" for k,v in ex["before"].items())
+                                    after_str = ", ".join(f"{k}={v}" for k,v in ex["after"].items())
+                                    case_info["action"] = f"{ex.get('action', '')} ({before_str} → {after_str})"
+                                case_info["verified"] = ex.get("verified", False)
+                            if ev_name == "case_closed":
+                                case_info["wall_clock_s"] = logged_ev.get("wall_clock_s")
+                            # Extract confidence from hypotheses/evidence
+                            if ev_name == "hypotheses_ready" and "case_type" not in case_info:
+                                case_info["case_type"] = logged_ev.get("case_type")
+                        log_case_to_sheet(case_info)
+                    except Exception as log_err:
+                        log.warning(f"Failed to log case {case_id} to sheet: {log_err}")
                 elif last_event_name == "approval_required":
                     _cases[case_id]["status"] = "awaiting_approval"
     except Exception as exc:
@@ -388,7 +426,7 @@ async def _start_gmail_poller():
             else:
                 log.warning(f"Pending case failed: {result}")
 
-        await poll_inbox(on_email, interval=10)
+        await poll_inbox(on_email, interval=1)
     except Exception as exc:
         log.warning(f"Gmail poller disabled: {exc}")
 
@@ -402,19 +440,29 @@ async def _start_telegram_poller():
                 # Approval/rejection from Telegram verdict alert
                 if case_id in _cases:
                     _cases[case_id]["status"] = "active"
-                    order_id = _cases[case_id]["order_id"]
-                    symptom = _cases[case_id]["symptom"]
-                    source = _cases[case_id]["source"]
+                    c_data = _cases[case_id]
+                    order_id = c_data["order_id"]
+                    symptom = c_data["symptom"]
+                    source = c_data["source"]
+                    sender = c_data.get("sender")
+                    summary = c_data.get("summary")
+                    thread_id = c_data.get("thread_id")
                 else:
                     pending = get_pending_case(case_id)
                     order_id = pending["order_id"] if pending else "unknown"
                     symptom = pending.get("symptom", "operations issue") if pending else "operations issue"
                     source = "email"
+                    sender = pending.get("sender") if pending else None
+                    summary = pending.get("summary") if pending else None
+                    thread_id = pending.get("thread_id") if pending else None
                 case = CasePayload(
                     case_id=case_id,
                     order_id=order_id,
                     symptom=symptom,
                     source=source,
+                    sender=sender,
+                    summary=summary,
+                    thread_id=thread_id,
                 )
                 asyncio.create_task(_run_investigation(case, resume={"approved": approved}))
             else:
@@ -438,8 +486,20 @@ async def _start_telegram_poller():
                         order_id=order_id,
                         symptom=symptom,
                         source="email",
+                        sender=pending.get("sender"),
+                        summary=pending.get("summary"),
+                        thread_id=pending.get("thread_id"),
                     )
                     _register_case(case)
+                    try:
+                        import sqlite3
+                        from enterprise.seed import DB_DIR
+                        conn = sqlite3.connect(DB_DIR / "cases.db")
+                        conn.execute("UPDATE cases SET status = 'active' WHERE case_id = ?", (case_id,))
+                        conn.commit()
+                        conn.close()
+                    except Exception:
+                        pass
                     asyncio.create_task(_run_investigation(case))
                 elif case_id in _cases:
                     case = CasePayload(
@@ -447,12 +507,14 @@ async def _start_telegram_poller():
                         order_id=_cases[case_id]["order_id"],
                         symptom=_cases[case_id]["symptom"],
                         source=_cases[case_id]["source"],
+                        sender=_cases[case_id].get("sender"),
+                        summary=_cases[case_id].get("summary"),
                     )
                     asyncio.create_task(_run_investigation(case))
                 else:
                     log.warning(f"Telegram investigate: case {case_id} not found")
 
-        await poll_callbacks(on_callback, interval=2)
+        await poll_callbacks(on_callback, interval=0.2)
     except Exception as exc:
         log.warning(f"Telegram poller disabled: {exc}")
 

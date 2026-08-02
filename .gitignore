@@ -26,3 +26,4 @@ Thumbs.db
 
 # agent scratch (SDD ledger, briefs, reports)
 .superpowers/
+.gemini/

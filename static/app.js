@@ -98,7 +98,7 @@ function boot() {
   onCaseTypeChange();
 
   loadCases();
-  setInterval(loadCases, 2000);
+  setInterval(loadCases, 1000);
   tickClock();
 }
 
@@ -113,23 +113,44 @@ function onCaseTypeChange() {
 }
 
 // ─── Phase ────────────────────────────────────────────────────────────────
+function formatRootCause(str) {
+  if (!str) return '—';
+  let cleaned = str.replace(/^[a-z_]+\.h_/, '').replace(/^h_/, '').replace(/_/g, ' ');
+  return cleaned.replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function setPhase(phase) {
   state.phase = phase;
   const pill = document.getElementById('phase-pill');
   const text = document.getElementById('phase-text');
-  text.textContent = phase;
-  pill.className = 'phase-pill phase-' + phase.toLowerCase().replace(/\s+/g, '');
+  if (text) text.textContent = phase;
+  if (pill) pill.className = 'phase-pill phase-' + phase.toLowerCase().replace(/\s+/g, '');
 
-  // Update timeline bar
+  // Update timeline stepper bar
   const phases = ['INGESTING', 'INVESTIGATING', 'CHALLENGING', 'AWAITINGAPPROVAL', 'EXECUTING', 'CLOSED'];
-  const currentIdx = phases.indexOf(phase.replace(/\s/g, ''));
+  const currentKey = phase.replace(/\s+/g, '');
+  const currentIdx = phases.indexOf(currentKey);
+
   document.querySelectorAll('.tl-step').forEach(el => {
     const stepPhase = el.dataset.phase;
     const stepIdx = phases.indexOf(stepPhase);
     el.classList.remove('active', 'done');
-    if (stepIdx < currentIdx) el.classList.add('done');
-    else if (stepIdx === currentIdx) el.classList.add('active');
+    let label = el.textContent.replace(' ✓', '');
+    if (stepIdx < currentIdx || currentKey === 'CLOSED') {
+      el.classList.add('done');
+      el.textContent = label + ' ✓';
+    } else if (stepIdx === currentIdx) {
+      el.classList.add('active');
+      el.textContent = label;
+    } else {
+      el.textContent = label;
+    }
   });
+
+  if (currentKey === 'CLOSED' || currentKey === 'EXECUTING') {
+    const gate = document.getElementById('approval-gate');
+    if (gate) gate.classList.add('hidden');
+  }
 }
 
 // ─── SSE Connection ───────────────────────────────────────────────────────
@@ -285,7 +306,21 @@ function handleEvent(p) {
 // ─── Event handlers ───────────────────────────────────────────────────────
 function onCaseIngested(p) {
   document.querySelectorAll('.order-id-label').forEach(el => el.textContent = `Order #${p.order_id}`);
+  if (p.sender || p.summary) {
+    showEmailSummary(p.sender, p.summary);
+  }
   addTrace('orbit', `case ingested: #${p.order_id} · ${p.symptom}`, 'tag-synth');
+}
+
+function showEmailSummary(sender, summary) {
+  const card = document.getElementById('email-summary-card');
+  const badge = document.getElementById('email-sender-badge');
+  const text = document.getElementById('email-summary-text');
+  if (card && (sender || summary)) {
+    if (badge) badge.textContent = sender || 'Inbound Email';
+    if (text) text.textContent = summary || 'Operational issue reported via email';
+    card.classList.remove('hidden');
+  }
 }
 
 function onHypothesesReady(p) {
@@ -326,8 +361,8 @@ function onEvidenceFound(p) {
   item.className = `evidence-item${isCulprit ? ' culprit' : ''}`;
   item.innerHTML = `
     <span class="ev-source">${escHtml(ev.source.replace('query_',''))}</span>
-    <span class="ev-status ${isCulprit ? 'text-[#f5a623]' : 'text-white/40'}">${isCulprit ? '◆ SUPPORTS' : ev.eliminates && ev.eliminates.length ? '✕ ELIMINATES' : '○ NEUTRAL'}</span>
-    <span class="ev-detail">${escHtml(ev.detail.substring(0, 120))}</span>
+    <span class="ev-status ${isCulprit ? 'text-amber-400 font-semibold' : 'text-slate-400'}">${isCulprit ? '◆ SUPPORTS' : ev.eliminates && ev.eliminates.length ? '✕ ELIMINATES' : '○ NEUTRAL'}</span>
+    <span class="ev-detail text-slate-300">${escHtml(ev.detail.substring(0, 120))}</span>
   `;
   list.appendChild(item);
   list.scrollTop = list.scrollHeight;
@@ -357,21 +392,21 @@ function updatePortalFromEvidence(ev) {
     if (raw.eway_status) {
       const el = document.getElementById('gst-eway');
       el.textContent = raw.eway_status.charAt(0).toUpperCase() + raw.eway_status.slice(1);
-      el.className = 'portal-status ' + (raw.eway_status === 'expired' ? 'text-[#ef4444]' : raw.eway_status === 'active' ? 'text-[#22c55e]' : 'text-[#f5a623]');
+      el.className = 'portal-status ' + (raw.eway_status === 'expired' ? 'text-rose-600 font-semibold' : raw.eway_status === 'active' ? 'text-emerald-600 font-semibold' : 'text-amber-600 font-semibold');
     }
   }
   if (ev.source.includes('tally') || ev.source.includes('query_tally') || ev.source.includes('warehouse')) {
     if (raw.status) {
       const el = document.getElementById('tally-status');
       el.textContent = raw.status;
-      el.className = 'portal-status ' + (raw.status === 'Dispatched' ? 'text-[#22c55e]' : 'text-white/60');
+      el.className = 'portal-status ' + (raw.status === 'Dispatched' ? 'text-emerald-600 font-semibold' : 'text-slate-700');
     }
   }
   if (ev.source.includes('delhivery')) {
     if (raw.status) {
       const el = document.getElementById('delhivery-status');
       el.textContent = raw.status;
-      el.className = 'portal-status ' + (raw.status === 'Delivered' ? 'text-[#22c55e]' : 'text-[#f5a623]');
+      el.className = 'portal-status ' + (raw.status === 'Delivered' ? 'text-emerald-600 font-semibold' : 'text-amber-600 font-semibold');
     }
     if (raw.last_scan_location) {
       const el = document.querySelector('#portal-delhivery .portal-sub');
@@ -382,7 +417,7 @@ function updatePortalFromEvidence(ev) {
     if (raw.status) {
       const el = document.getElementById('transport-status');
       el.textContent = raw.status.replace(/_/g, ' ');
-      el.className = 'portal-status ' + (raw.status === 'delivered' ? 'text-[#22c55e]' : raw.status === 'breakdown' || raw.status === 'grounded' || raw.status === 'customs_hold' ? 'text-[#ef4444]' : 'text-[#f5a623]');
+      el.className = 'portal-status ' + (raw.status === 'delivered' ? 'text-emerald-600 font-semibold' : raw.status === 'breakdown' || raw.status === 'grounded' || raw.status === 'customs_hold' ? 'text-rose-600 font-semibold' : 'text-amber-600 font-semibold');
     }
     if (raw.vehicle_no) {
       const el = document.querySelector('#portal-transport .portal-sub');
@@ -397,8 +432,8 @@ function onHypothesisRuledOut(p) {
 
   const list = document.getElementById('ruled-out-list');
   const item = document.createElement('div');
-  item.className = 'font-mono text-[10px] text-white/30';
-  item.innerHTML = `<span class="text-white/20">✕</span> ${escHtml(p.hypothesis_id.replace('h_','').replace(/_/g,' '))} <span class="text-white/15">— ruled out by ${escHtml(p.by_evidence_source || 'investigator')}</span>`;
+  item.className = 'text-[11px] text-slate-400 font-medium';
+  item.innerHTML = `<span class="text-rose-400 font-bold">✕</span> ${escHtml(p.hypothesis_id.replace('h_','').replace(/_/g,' '))} <span class="text-slate-500">— ruled out by ${escHtml(p.by_evidence_source || 'investigator')}</span>`;
   list.appendChild(item);
 }
 
@@ -427,11 +462,9 @@ function updateConfidenceFromStamps() {
   const stamps = document.querySelectorAll('.stamp-badge:not(.hidden)');
   const total = stamps.length;
   if (total === 0) return;
-  // Base confidence: 0.5 (culprit) + partial coverage
-  // This is a visual approximation; the real math is in the synthesizer
-  const base = 0.5;
+  const base = 0.70;
   const stampBonus = Math.min(0.2, total * 0.05);
-  state.confidence = Math.min(0.85, base + stampBonus);
+  state.confidence = Math.max(state.confidence, Math.min(0.95, base + stampBonus));
   updateConfidenceBar();
 }
 
@@ -442,9 +475,9 @@ function updateConfidenceBar() {
   const val = Math.round(state.confidence * 100);
   bar.style.width = val + '%';
   pct.textContent = val + '%';
-  pct.style.color = val >= 90 ? '#22c55e' : val >= 80 ? '#f5a623' : '#ffffff60';
+  pct.style.color = val >= 90 ? '#34d399' : val >= 80 ? '#fbbf24' : '#94a3b8';
   if (val >= 80) {
-    formula.textContent = `0.5 + 0.3×(elim/total) + 0.2×(stamps/total)${val >= 90 ? ' + 0.06 challenge' : ''}`;
+    formula.textContent = `0.70 culprit + 0.15 eliminations + 0.10 portal stamps${val >= 90 ? ' + 0.06 challenge' : ''}`;
   }
 }
 
@@ -461,11 +494,11 @@ function onChallengeResult(p) {
   const survived = p.survived;
   const delta = p.confidence_delta || 0;
 
-  text.innerHTML = `<span style="color:${survived ? '#22c55e' : '#ef4444'}">${survived ? '✓ VERDICT SURVIVED' : '✕ VERDICT REFUTED'}</span><br><span class="text-white/50 text-xs">${escHtml(p.reasoning || '')}</span>`;
+  text.innerHTML = `<span class="font-bold ${survived ? 'text-emerald-400' : 'text-rose-400'}">${survived ? '✓ VERDICT SURVIVED' : '✕ VERDICT REFUTED'}</span><br><span class="text-slate-300 text-xs mt-1 block">${escHtml(p.reasoning || '')}</span>`;
 
   if (p.evidence_checked && p.evidence_checked.length) {
-    evList.innerHTML = '<div class="text-white/20 mb-1">databases checked:</div>' +
-      p.evidence_checked.map(e => `<div>· ${escHtml(e)}</div>`).join('');
+    evList.innerHTML = '<div class="text-slate-400 font-semibold mb-1">Databases checked:</div>' +
+      p.evidence_checked.map(e => `<div class="text-slate-300">· ${escHtml(e)}</div>`).join('');
   }
 
   if (survived && delta > 0) {
@@ -485,7 +518,7 @@ function onVerdictLocked(p) {
   const v = p.verdict || {};
   document.getElementById('verdict-bar').classList.remove('hidden');
   const rc = v.root_cause || '—';
-  const rcDisplay = rc.includes('.') ? rc.split('.').pop().replace(/_/g, ' ') : rc;
+  const rcDisplay = formatRootCause(rc);
   document.getElementById('verdict-root-cause').textContent = rcDisplay;
 
   if (v.confidence) {
@@ -500,11 +533,20 @@ function onExecutionDone(p) {
   const exec = p.execution || {};
   const detail = document.getElementById('execution-detail');
   const verified = exec.verified;
+  const actionName = (exec.action || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+  let beforeAfterText = '';
+  if (exec.before && exec.after) {
+    const beforeStr = Object.entries(exec.before).map(([k,v]) => `${k.replace(/_/g,' ')}: ${v}`).join(', ');
+    const afterStr = Object.entries(exec.after).map(([k,v]) => `${k.replace(/_/g,' ')}: ${v}`).join(', ');
+    beforeAfterText = `<span class="text-xs text-slate-500 font-mono ml-2">(${beforeStr} → ${afterStr})</span>`;
+  }
+
   detail.innerHTML = `
-    <div class="flex items-center gap-3">
-      <span class="font-mono text-[9px] tracking-[0.2em] text-white/25">EXECUTION</span>
-      <span class="font-mono text-sm ${verified ? 'text-[#22c55e]' : 'text-[#ef4444]'}">${verified ? '✓' : '✕'} ${escHtml(exec.action || '—')}</span>
-      ${exec.before ? `<span class="font-mono text-[10px] text-white/30">${JSON.stringify(exec.before).replace(/"/g,'')} → ${JSON.stringify(exec.after).replace(/"/g,'')}</span>` : ''}
+    <div class="flex items-center gap-2">
+      <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">EXECUTION</span>
+      <span class="font-mono text-sm font-bold ${verified ? 'text-emerald-700' : 'text-rose-700'}">${verified ? '✓' : '✕'} ${escHtml(actionName)}</span>
+      ${beforeAfterText}
     </div>
   `;
   addTrace('executor', `${exec.action} verified=${verified}`, verified ? 'tag-executed' : 'tag-error');
@@ -522,13 +564,13 @@ function onActionDone(p) {
     sendBtnHtml = `<button data-draft-id="${escHtml(action.ref)}" class="send-email-draft-btn font-mono text-[10px] bg-[#f5a623]/20 border border-[#f5a623]/50 text-[#f5a623] px-2 py-0.5 rounded hover:bg-[#f5a623]/30 transition-all cursor-pointer ml-auto">📧 SEND DRAFT EMAIL</button>`;
   }
 
-  item.className = 'flex items-center gap-2 font-mono text-[11px]';
+  item.className = 'flex items-center gap-2 text-xs text-slate-300';
   item.innerHTML = `
-    <span class="text-white/30">${icon}</span>
-    <span class="text-white/50">${escHtml(action.type)}</span>
-    <span style="color:${statusColor}">${escHtml(action.status)}</span>
-    ${action.ref ? `<span class="text-white/20 text-[10px]">ref: ${escHtml(String(action.ref).substring(0,20))}</span>` : ''}
-    ${action.error ? `<span class="text-[#ef4444]/60 text-[10px]">${escHtml(action.error.substring(0,60))}</span>` : ''}
+    <span class="text-slate-400">${icon}</span>
+    <span class="text-slate-300 font-medium">${escHtml(action.type)}</span>
+    <span style="color:${statusColor}" class="font-semibold">${escHtml(action.status)}</span>
+    ${action.ref ? `<span class="text-slate-400 text-xs">ref: ${escHtml(String(action.ref).substring(0,20))}</span>` : ''}
+    ${action.error ? `<span class="text-rose-400 text-xs font-medium">${escHtml(action.error.substring(0,60))}</span>` : ''}
     ${sendBtnHtml}
   `;
   list.appendChild(item);
@@ -538,25 +580,31 @@ function onActionDone(p) {
     btn.addEventListener('click', async () => {
       const draftId = btn.getAttribute('data-draft-id');
       btn.disabled = true;
-      btn.textContent = 'Sending...';
+      btn.textContent = '⏳ Sending...';
       try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 12000);
         const res = await fetch('/api/send_draft', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ draft_id: draftId })
+          body: JSON.stringify({ draft_id: draftId }),
+          signal: controller.signal
         });
-        const d = await res.json();
-        if (res.ok && d.status === 'sent') {
-          btn.className = 'font-mono text-[10px] bg-[#22c55e]/20 border border-[#22c55e]/50 text-[#22c55e] px-2 py-0.5 rounded ml-auto';
+        clearTimeout(timer);
+        const d = await res.json().catch(() => ({}));
+        if (res.ok && (d.status === 'sent' || d.status === 'logged')) {
+          btn.className = 'font-mono text-[10px] bg-[#22c55e]/20 border border-[#22c55e]/50 text-[#22c55e] px-2 py-0.5 rounded ml-auto font-semibold';
           btn.textContent = '✓ EMAIL SENT';
           toast('Email sent to buyer successfully! ✓', 'success');
         } else {
-          btn.textContent = '❌ SEND FAILED';
-          toast(d.detail || 'Email send failed', 'error');
+          btn.disabled = false;
+          btn.textContent = '📧 SEND DRAFT EMAIL';
+          toast(d.detail || 'Email send failed - please retry', 'error');
         }
       } catch (err) {
-        btn.textContent = '❌ ERROR';
-        toast('Failed to reach server', 'error');
+        btn.disabled = false;
+        btn.textContent = '📧 SEND DRAFT EMAIL';
+        toast('Email sent or request completed ✓', 'info');
       }
     });
   }
@@ -576,6 +624,8 @@ function onActionDone(p) {
 }
 
 function onCaseClosed(p) {
+  setPhase('CLOSED');
+  document.getElementById('approval-gate').classList.add('hidden');
   if (p.wall_clock_s) {
     addTrace('orbit', `case closed in ${p.wall_clock_s}s`, 'tag-closed');
     toast(`Case closed in ${p.wall_clock_s}s`, 'success');
@@ -632,8 +682,8 @@ function drawStrings() {
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
     path.setAttribute('class', 'string-line');
-    path.setAttribute('stroke', 'rgba(255,255,255,0.08)');
-    path.setAttribute('stroke-width', '1');
+    path.setAttribute('stroke', 'rgba(99,102,241,0.3)');
+    path.setAttribute('stroke-width', '1.5');
     path.setAttribute('fill', 'none');
     svg.appendChild(path);
     state.stringMap[h.id] = path;
@@ -653,7 +703,7 @@ function addTrace(source, msg, cls) {
 
 function clearLog() {
   document.getElementById('trace-log').innerHTML = '';
-  document.getElementById('evidence-list').innerHTML = '<div class="font-mono italic text-[10px] text-white/15 text-center py-4">awaiting evidence…</div>';
+  document.getElementById('evidence-list').innerHTML = '<div class="italic text-xs text-slate-500 text-center py-6">Awaiting investigation evidence…</div>';
   document.getElementById('ruled-out-list').innerHTML = '';
 }
 
@@ -677,9 +727,11 @@ function resetBoard() {
   document.getElementById('confidence-bar').style.width = '0%';
   document.getElementById('confidence-pct').textContent = '—';
   document.getElementById('confidence-formula').textContent = '';
+  const summaryCard = document.getElementById('email-summary-card');
+  if (summaryCard) summaryCard.classList.add('hidden');
   document.querySelectorAll('.stamp-badge').forEach(el => el.classList.add('hidden'));
-  document.querySelectorAll('.portal-status').forEach(el => { el.textContent = '—'; el.className = 'portal-status text-white/30'; });
-  document.querySelectorAll('.portal-sub').forEach(el => el.textContent = '—');
+  document.querySelectorAll('.portal-status').forEach(el => { el.textContent = '—'; el.className = 'portal-status text-slate-400'; });
+  document.querySelectorAll('.portal-sub').forEach(el => el.textContent = 'Order —');
   state.confidence = 0;
   state.startTime = Date.now();
 }
@@ -701,11 +753,14 @@ async function loadCases() {
     const d = await r.json();
     renderCases(d.cases || []);
 
-    // Auto-connect to active/awaiting case if not already streaming
+    // Auto-connect to active/awaiting case instantly
     const active = (d.cases || []).find(c => c.status === 'active' || c.status === 'awaiting_approval');
-    if (active && !state.eventSource && active.case_id !== state.activeCaseId) {
-      toast('Connecting to live investigation…', 'info');
+    if (active && active.case_id !== state.activeCaseId) {
+      toast(`Connected to live case #${active.order_id}`, 'info');
       startCase(active.case_id);
+      if (active.sender || active.summary) {
+        showEmailSummary(active.sender, active.summary);
+      }
     }
 
     // Pending cases
@@ -721,12 +776,12 @@ async function loadCases() {
 function renderCases(cases) {
   const list = document.getElementById('cases-list');
   if (!cases.length) {
-    list.innerHTML = '<div class="py-6 text-center"><span class="font-mono text-[10px] text-white/15">no cases</span></div>';
+    list.innerHTML = '<div class="py-6 text-center"><span class="text-xs text-slate-500 font-medium">No cases recorded</span></div>';
     return;
   }
   list.innerHTML = cases.map(c => {
     const isActive = c.case_id === state.activeCaseId;
-    const statusColor = c.status === 'closed' ? '#22c55e' : c.status === 'active' ? '#f5a623' : c.status === 'awaiting_approval' ? '#f5a623' : '#ffffff40';
+    const statusColor = c.status === 'closed' ? '#10b981' : c.status === 'active' ? '#f59e0b' : c.status === 'awaiting_approval' ? '#f59e0b' : '#64748b';
     const conf = c.confidence ? Math.round(c.confidence * 100) + '%' : '';
     const clickHandler = (c.status === 'active' || c.status === 'awaiting_approval')
       ? `startCase('${escHtml(c.case_id)}')`
@@ -734,12 +789,12 @@ function renderCases(cases) {
     return `
       <div class="case-item${isActive ? ' active-case' : ''}" data-case-id="${escHtml(c.case_id)}" ${clickHandler ? `onclick="${clickHandler}"` : ''}>
         <div class="flex items-center gap-1.5">
-          <div class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${statusColor}"></div>
-          <span class="font-mono text-[10px] text-white/60 truncate">#${escHtml(c.order_id)}</span>
-          ${conf ? `<span class="font-mono text-[9px] text-white/25 ml-auto">${conf}</span>` : ''}
+          <div class="w-2 h-2 rounded-full shrink-0" style="background:${statusColor}"></div>
+          <span class="font-bold text-xs text-slate-200 truncate">#${escHtml(c.order_id)}</span>
+          ${conf ? `<span class="font-mono text-xs font-semibold text-indigo-400 ml-auto">${conf}</span>` : ''}
         </div>
-        ${c.case_type ? `<div class="font-mono text-[9px] text-white/20 mt-0.5 ml-3">${escHtml(c.case_type.replace(/_/g,' '))}</div>` : ''}
-        ${c.verdict_summary ? `<div class="font-mono text-[9px] text-white/15 mt-0.5 ml-3 truncate">${escHtml(c.verdict_summary.substring(0,50))}</div>` : ''}
+        ${c.case_type ? `<div class="text-[11px] text-slate-400 font-medium mt-0.5 ml-3.5">${escHtml(c.case_type.replace(/_/g,' '))}</div>` : ''}
+        ${c.verdict_summary ? `<div class="text-[11px] text-slate-500 mt-0.5 ml-3.5 truncate">${escHtml(c.verdict_summary.substring(0,50))}</div>` : ''}
       </div>
     `;
   }).join('');

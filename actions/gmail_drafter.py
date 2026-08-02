@@ -47,6 +47,16 @@ from contracts import ActionResult, CasePayload, Verdict
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.compose"]
 
+# Buyer email mapping for manual/demo orders (no inbound sender available)
+ORDER_BUYER_EMAILS: dict[str, str] = {
+    "402": "buyer.recon@acmelogistics.com",
+    "501": "buyer.recon@acmelogistics.com",
+    "502": "warehouse.ops@globaltraders.in",
+    "503": "customs.desk@importexport.co.in",
+    "504": "accounts@priyatextiles.com",
+    "505": "compliance.desk@transportfleet.com",
+}
+
 
 def _token_path() -> Path:
     """token.json sits next to the OAuth client JSON from env.
@@ -66,27 +76,32 @@ def _load_credentials() -> Credentials:
     return Credentials.from_authorized_user_file(str(_token_path()), SCOPES)
 
 
-def _buyer_email(sender: str | None) -> str:
-    """The usable To address from the case sender, or fallback for demo/manual cases.
+def _buyer_email(sender: str | None, order_id: str | None = None) -> str:
+    """The usable To address from the case sender or order ID lookup.
 
-    Checks BUYER_EMAIL_OVERRIDE or DEFAULT_BUYER_EMAIL in env first, then parses sender.
-    If sender is a placeholder or missing, defaults to abdulhafeel223@gmail.com.
+    Prioritizes real inbound email addresses, or falls back to DEFAULT_BUYER_EMAIL
+    (abdulhafeel223@gmail.com) so test & demo emails land directly in the user's inbox.
     """
     override = os.environ.get("BUYER_EMAIL_OVERRIDE") or os.environ.get("DEFAULT_BUYER_EMAIL") or os.environ.get("TEST_BUYER_EMAIL")
+
+    if sender:
+        bracketed = re.search(r"<([^<>@]+@[^<>@]+)>", sender)
+        if bracketed:
+            addr = bracketed.group(1).strip()
+            if not any(dummy in addr for dummy in ("example.com", "orbit.local", "globaltraders.in", "acmelogistics.com", "importexport.co.in", "priyatextiles.com", "transportfleet.com", "orbit-operations.com")):
+                return addr
+        raw_match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", sender)
+        if raw_match:
+            addr = raw_match.group(0).strip()
+            if not any(dummy in addr for dummy in ("example.com", "orbit.local", "globaltraders.in", "acmelogistics.com", "importexport.co.in", "priyatextiles.com", "transportfleet.com", "orbit-operations.com")):
+                return addr
+
     if override and "@" in override:
         return override.strip()
 
-    if not sender:
-        return "abdulhafeel223@gmail.com"
-    bracketed = re.search(r"<([^<>@]+@[^<>@]+)>", sender)
-    if bracketed:
-        addr = bracketed.group(1).strip()
-        if "example.com" not in addr and "orbit.local" not in addr:
-            return addr
-    if "@" in sender and "example.com" not in sender and "orbit.local" not in sender:
-        return sender
-    if "." in sender and " " not in sender and "example.com" not in sender and "orbit.local" not in sender:
-        return sender
+    if order_id and str(order_id) in ORDER_BUYER_EMAILS:
+        return ORDER_BUYER_EMAILS[str(order_id)]
+
     return "abdulhafeel223@gmail.com"
 
 
@@ -159,7 +174,7 @@ def create_buyer_draft(verdict: Verdict, case: CasePayload, thread_id: str) -> A
     DRAFT ONLY — approval-gated by design; never calls send(). Never raises;
     every failure path returns ActionResult(status="failed", error=...).
     """
-    recipient = _buyer_email(case.sender)
+    recipient = _buyer_email(case.sender, case.order_id)
     try:
         creds = _load_credentials()
         if not creds.valid:
@@ -172,10 +187,14 @@ def create_buyer_draft(verdict: Verdict, case: CasePayload, thread_id: str) -> A
             creds.refresh(Request())
         service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         raw = base64.urlsafe_b64encode(_build_email(verdict, case, recipient)).decode()
+        # Build message body — only include threadId if it's a real thread
+        msg_body: dict = {"raw": raw}
+        if thread_id and isinstance(thread_id, str) and len(thread_id) > 5:
+            msg_body["threadId"] = thread_id
         draft = (
             service.users()
             .drafts()
-            .create(userId="me", body={"message": {"raw": raw, "threadId": thread_id}})
+            .create(userId="me", body={"message": msg_body})
             .execute()
         )
         if not draft.get("id"):

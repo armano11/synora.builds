@@ -102,8 +102,6 @@ async def _poll_once(callback) -> dict:
     try:
         global _last_poll
         query = "in:inbox is:unread"
-        if _last_poll:
-            query += f" after:{int(_last_poll)}"
         listing = (
             service.users().messages().list(
                 userId="me", q=query, maxResults=10

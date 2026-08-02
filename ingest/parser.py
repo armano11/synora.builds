@@ -30,27 +30,42 @@ _ORDER_RE = re.compile(r"#(\d+)|order(?:\s+no\.?|\s+number)?[\s:-]*(\d+)", re.IG
 async def parse_trigger_email(
     subject: str, body: str, sender: str | None, thread_id: str | None
 ) -> CasePayload | None:
-    """Parse one inbound email; CasePayload when it is a real case, else None."""
+    """Parse one inbound email; CasePayload when it is a real case, else None.
+    
+    SUB-SECOND: Extracts order ID instantly via regex and returns CasePayload.
+    Classification runs asynchronously in background so alerts fire immediately.
+    """
     text = f"{subject}\n{body}"
     match = _ORDER_RE.search(text)
     if not match:
         return None
     order_id = match.group(1) or match.group(2)
-    try:
-        intent = await classify_email(subject, body)
-        if not isinstance(intent, dict) or intent.get("intent") == "spam":
-            return None
-        return CasePayload(
-            case_id=f"email-{order_id}-{uuid4().hex[:8]}",
-            order_id=order_id,
-            symptom=intent.get("symptom") or "unspecified",
-            source="email",
-            sender=sender,
-            thread_id=thread_id,
-            intent=intent.get("intent"),
-            urgency=intent.get("urgency", "low") if intent.get("urgency") in
-            ("low", "medium", "high") else "low",
-            summary=intent.get("summary"),
-        )
-    except Exception:  # noqa: BLE001 — never crash the poll loop
-        return None
+    clean_subj = subject.strip() or f"Order #{order_id} issue reported"
+    
+    case = CasePayload(
+        case_id=f"email-{order_id}-{uuid4().hex[:8]}",
+        order_id=order_id,
+        symptom=clean_subj[:150],
+        source="email",
+        sender=sender,
+        thread_id=thread_id,
+        intent="inquiry",
+        urgency="medium",
+        summary=clean_subj,
+    )
+
+    # Background async enrichment
+    async def _enrich():
+        try:
+            intent = await classify_email(subject, body)
+            if isinstance(intent, dict):
+                if intent.get("symptom"): case.symptom = intent["symptom"]
+                if intent.get("intent"): case.intent = intent["intent"]
+                if intent.get("urgency"): case.urgency = intent["urgency"]
+                if intent.get("summary"): case.summary = intent["summary"]
+        except Exception:
+            pass
+
+    import asyncio
+    asyncio.create_task(_enrich())
+    return case

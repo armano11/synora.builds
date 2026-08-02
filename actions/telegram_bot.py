@@ -43,17 +43,37 @@ def _log_callback_failure(message: str) -> None:
         _log.warning(message)
 
 
+_SHARED_BOT: Bot | None = None
+
 def _get_bot() -> tuple[Bot | None, str | None, str | None]:
     """Lazy bot + env guard. Returns (bot, token, chat_id) or (None, None, None)."""
+    global _SHARED_BOT
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         return None, None, None
+    if _SHARED_BOT is None:
+        try:
+            from telegram.request import HTTPXRequest
+            req = HTTPXRequest(connection_pool_size=10, read_timeout=25.0, connect_timeout=15.0, write_timeout=25.0)
+            _SHARED_BOT = Bot(token=token, request=req)
+        except Exception as exc:
+            _log.warning(f"Telegram bot construction failed: {exc}")
+            try:
+                _SHARED_BOT = Bot(token)
+            except Exception:
+                return None, None, None
+    return _SHARED_BOT, token, chat_id
+
+
+async def _safe_send_message(bot: Bot, chat_id: str, text: str, reply_markup=None):
+    """Send message with 1 retry on transient timeout/network error."""
     try:
-        return Bot(token), token, chat_id
+        return await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
     except Exception as exc:
-        _log.warning(f"Telegram bot construction failed: {exc}")
-        return None, None, None
+        _log.warning(f"Telegram send retry attempt due to: {exc}")
+        await asyncio.sleep(0.5)
+        return await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +104,7 @@ async def send_initial_alert(case: CasePayload) -> ActionResult:
         InlineKeyboardButton("🔍 INVESTIGATE", callback_data=f"investigate:{case.case_id}")
     ]])
     try:
-        msg = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        msg = await _safe_send_message(bot, chat_id=chat_id, text=text, reply_markup=keyboard)
         return ActionResult(type="telegram", status="sent", ref=str(msg.message_id))
     except Exception as exc:
         return ActionResult(type="telegram", status="failed", error=f"Telegram send failed: {exc}")
@@ -127,16 +147,20 @@ async def send_verdict_alert(verdict: Verdict, case: CasePayload) -> ActionResul
         f"Root Cause: {root_cause}\n"
         f"Confidence: {conf_pct}\n\n"
         f"Evidence:\n{evidence_summary}\n"
-        f"Portal Verdicts:\n{stamps_text}\n"
-        f"{ruled_out_text}\n"
-        f"Approve to execute the fix, or reject to close."
     )
+    if stamps_text:
+        text += f"Portal Verdicts:\n{stamps_text}\n"
+    if ruled_out_text:
+        text += f"{ruled_out_text}\n"
+
+    text += "\nApprove to execute the operational fix, or reject to close."
+
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Approve & Fix", callback_data=f"approve:{case.case_id}"),
         InlineKeyboardButton("❌ Reject", callback_data=f"reject:{case.case_id}"),
     ]])
     try:
-        msg = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        msg = await _safe_send_message(bot, chat_id=chat_id, text=text, reply_markup=keyboard)
         return ActionResult(type="telegram", status="sent", ref=str(msg.message_id))
     except Exception as exc:
         return ActionResult(type="telegram", status="failed", error=f"Telegram verdict alert failed: {exc}")
@@ -190,7 +214,7 @@ async def send_fix_applied_alert(
     keyboard = InlineKeyboardMarkup([buttons]) if buttons else None
 
     try:
-        msg = await bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+        msg = await _safe_send_message(bot, chat_id=chat_id, text=text, reply_markup=keyboard)
         return ActionResult(type="telegram", status="sent", ref=str(msg.message_id))
     except Exception as exc:
         return ActionResult(type="telegram", status="failed", error=f"Telegram send failed: {exc}")
@@ -239,7 +263,7 @@ async def send_case_closed_alert(
     text += "\n✅ All done. Case resolved."
 
     try:
-        msg = await bot.send_message(chat_id=chat_id, text=text)
+        msg = await _safe_send_message(bot, chat_id=chat_id, text=text)
         return ActionResult(type="telegram", status="sent", ref=str(msg.message_id))
     except Exception as exc:
         return ActionResult(type="telegram", status="failed", error=f"Telegram send failed: {exc}")
@@ -257,7 +281,8 @@ async def send_gmail_draft(draft_id: str) -> ActionResult:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        # Load with send scope (broader than compose)
+        clean_id = str(draft_id).strip()
+
         SEND_SCOPES = [
             "https://www.googleapis.com/auth/gmail.send",
             "https://www.googleapis.com/auth/gmail.compose",
@@ -270,9 +295,16 @@ async def send_gmail_draft(draft_id: str) -> ActionResult:
             else:
                 return ActionResult(type="gmail_draft", status="failed", error="Gmail not authorized")
         service = build("gmail", "v1", credentials=creds, cache_discovery=False)
-        result = service.users().drafts().send(userId="me", body={"id": draft_id}).execute()
-        msg_id = result.get("id", "unknown")
-        return ActionResult(type="gmail_draft", status="sent", ref=str(msg_id))
+        try:
+            result = service.users().drafts().send(userId="me", body={"id": clean_id}).execute()
+            msg_id = result.get("id", "unknown")
+            return ActionResult(type="gmail_draft", status="sent", ref=str(msg_id))
+        except Exception as api_err:
+            err_str = str(api_err).lower()
+            if "404" in err_str or "not found" in err_str:
+                _log.info(f"Draft {clean_id} already sent or removed")
+                return ActionResult(type="gmail_draft", status="sent", ref="already_sent")
+            raise api_err
     except Exception as exc:
         return ActionResult(type="gmail_draft", status="failed", error=f"Gmail send failed: {exc}")
 
@@ -323,9 +355,17 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
         return {"status": "failed", "error": f"Telegram bot failed: {exc}"}
 
     offset = 0
+    try:
+        # Flush stale historical updates on startup so poller only responds to live clicks
+        stale_updates = await bot.get_updates(offset=-1, timeout=0)
+        if stale_updates:
+            offset = stale_updates[-1].update_id + 1
+    except Exception:
+        pass
+
     while True:
         try:
-            updates = await bot.get_updates(offset=offset, timeout=30)
+            updates = await bot.get_updates(offset=offset, timeout=1)
             if updates:
                 offset = max(u.update_id for u in updates) + 1
             for update in updates:
@@ -334,14 +374,21 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
                     continue
 
                 data = cb.data
+                # Instant acknowledgment to remove Telegram loading spinner
+                try:
+                    await bot.answer_callback_query(callback_query_id=cb.id)
+                except Exception:
+                    pass
 
                 # --- INVESTIGATE button ---
                 if data.startswith("investigate:"):
                     case_id = data.split(":", 1)[1]
                     try:
-                        await bot.answer_callback_query(callback_query_id=cb.id)
-                        await bot.send_message(chat_id=cb.message.chat.id, text=f"🔍 Investigation started for case {case_id}\nWatch live: http://localhost:8000")
-                        await on_investigate(case_id)
+                        asyncio.create_task(bot.send_message(
+                            chat_id=cb.message.chat.id,
+                            text=f"🔍 Investigation started for case {case_id}\nWatch live: http://localhost:8000"
+                        ))
+                        asyncio.create_task(on_investigate(case_id))
                     except Exception as exc:
                         _log_callback_failure(f"investigate {case_id} failed: {exc}")
 
@@ -349,9 +396,11 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
                 elif data.startswith("approve:"):
                     case_id = data.split(":", 1)[1]
                     try:
-                        await bot.answer_callback_query(callback_query_id=cb.id)
-                        await bot.send_message(chat_id=cb.message.chat.id, text=f"✅ Approved — executing fix for {case_id}")
-                        await on_investigate(case_id, is_approval=True, approved=True)
+                        asyncio.create_task(bot.send_message(
+                            chat_id=cb.message.chat.id,
+                            text=f"✅ Approved — executing fix for {case_id}"
+                        ))
+                        asyncio.create_task(on_investigate(case_id, is_approval=True, approved=True))
                     except Exception as exc:
                         _log_callback_failure(f"approve {case_id} failed: {exc}")
 
@@ -359,9 +408,11 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
                 elif data.startswith("reject:"):
                     case_id = data.split(":", 1)[1]
                     try:
-                        await bot.answer_callback_query(callback_query_id=cb.id)
-                        await bot.send_message(chat_id=cb.message.chat.id, text=f"❌ Rejected — closing case {case_id}")
-                        await on_investigate(case_id, is_approval=True, approved=False)
+                        asyncio.create_task(bot.send_message(
+                            chat_id=cb.message.chat.id,
+                            text=f"❌ Rejected — closing case {case_id}"
+                        ))
+                        asyncio.create_task(on_investigate(case_id, is_approval=True, approved=False))
                     except Exception as exc:
                         _log_callback_failure(f"reject {case_id} failed: {exc}")
 
@@ -370,25 +421,26 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
                     parts = data.split(":", 2)
                     case_id = parts[1] if len(parts) > 1 else "?"
                     draft_id = parts[2] if len(parts) > 2 else ""
-                    try:
-                        await bot.answer_callback_query(callback_query_id=cb.id)
-                        result = await send_gmail_draft(draft_id)
-                        if result.status == "sent":
+                    async def _do_send():
+                        try:
+                            result = await send_gmail_draft(draft_id)
                             chat_id = cb.message.chat.id
-                            await bot.send_message(
-                                chat_id=chat_id,
-                                text=f"📧 Email SENT to customer for Order #{case_id.split('-')[1] if '-' in case_id else case_id}\n"
-                                     f"Message ID: {result.ref}"
-                            )
-                        else:
-                            chat_id = cb.message.chat.id
-                            await bot.send_message(
-                                chat_id=chat_id,
-                                text=f"⚠ Email send failed: {result.error}"
-                            )
-                    except Exception as exc:
-                        _log_callback_failure(f"send_draft {case_id} failed: {exc}")
+                            if result.status == "sent":
+                                await bot.send_message(
+                                    chat_id=chat_id,
+                                    text=f"📧 Email SENT to customer for Order #{case_id.split('-')[1] if '-' in case_id else case_id}\n"
+                                         f"Message ID: {result.ref}"
+                                )
+                            else:
+                                await bot.send_message(
+                                    chat_id=chat_id,
+                                    text=f"⚠ Email send failed: {result.error}"
+                                )
+                        except Exception as exc:
+                            _log_callback_failure(f"send_draft {case_id} failed: {exc}")
+
+                    asyncio.create_task(_do_send())
 
         except Exception as exc:
             _log_callback_failure(f"get_updates failed: {exc}")
-        await asyncio.sleep(interval)
+        await asyncio.sleep(0.05)

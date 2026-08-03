@@ -98,7 +98,7 @@ function boot() {
   onCaseTypeChange();
 
   loadCases();
-  setInterval(loadCases, 1000);
+  setInterval(loadCases, 1500);
   tickClock();
 }
 
@@ -114,7 +114,7 @@ function onCaseTypeChange() {
 
 // ─── Phase ────────────────────────────────────────────────────────────────
 function formatRootCause(str) {
-  if (!str) return '—';
+  if (!str) return '\u2014';
   let cleaned = str.replace(/^[a-z_]+\.h_/, '').replace(/^h_/, '').replace(/_/g, ' ');
   return cleaned.replace(/\b\w/g, c => c.toUpperCase());
 }
@@ -135,10 +135,10 @@ function setPhase(phase) {
     const stepPhase = el.dataset.phase;
     const stepIdx = phases.indexOf(stepPhase);
     el.classList.remove('active', 'done');
-    let label = el.textContent.replace(' ✓', '');
+    let label = el.textContent.replace(' \u2713', '');
     if (stepIdx < currentIdx || currentKey === 'CLOSED') {
       el.classList.add('done');
-      el.textContent = label + ' ✓';
+      el.textContent = label + ' \u2713';
     } else if (stepIdx === currentIdx) {
       el.classList.add('active');
       el.textContent = label;
@@ -336,6 +336,8 @@ function onHypothesesReady(p) {
     row.appendChild(chip);
   });
   addTrace('router', `${p.hypotheses.length} hypotheses formulated`, 'tag-router');
+  state.confidence = 0.50;
+  updateConfidenceBar();
   setTimeout(drawStrings, 300);
 }
 
@@ -433,7 +435,7 @@ function onHypothesisRuledOut(p) {
   const list = document.getElementById('ruled-out-list');
   const item = document.createElement('div');
   item.className = 'text-[11px] text-slate-400 font-medium';
-  item.innerHTML = `<span class="text-rose-400 font-bold">✕</span> ${escHtml(p.hypothesis_id.replace('h_','').replace(/_/g,' '))} <span class="text-slate-500">— ruled out by ${escHtml(p.by_evidence_source || 'investigator')}</span>`;
+  item.innerHTML = `<span class="text-rose-400 font-bold">\u2715</span> ${escHtml(p.hypothesis_id.replace('h_','').replace(/_/g,' '))} <span class="text-slate-500">\u2014 ruled out by ${escHtml(p.by_evidence_source || 'investigator')}</span>`;
   list.appendChild(item);
 }
 
@@ -469,14 +471,18 @@ function updateConfidenceFromStamps() {
 }
 
 function updateConfidenceBar() {
+  const sec = document.getElementById('confidence-section');
+  if (sec) sec.classList.remove('hidden');
   const bar = document.getElementById('confidence-bar');
   const pct = document.getElementById('confidence-pct');
   const formula = document.getElementById('confidence-formula');
-  const val = Math.round(state.confidence * 100);
-  bar.style.width = val + '%';
-  pct.textContent = val + '%';
-  pct.style.color = val >= 90 ? '#34d399' : val >= 80 ? '#fbbf24' : '#94a3b8';
-  if (val >= 80) {
+  const val = Math.max(15, Math.round(state.confidence * 100));
+  if (bar) bar.style.width = val + '%';
+  if (pct) {
+    pct.textContent = val + '%';
+    pct.style.color = val >= 90 ? '#15803d' : val >= 75 ? '#d97706' : '#57534e';
+  }
+  if (formula) {
     formula.textContent = `0.70 culprit + 0.15 eliminations + 0.10 portal stamps${val >= 90 ? ' + 0.06 challenge' : ''}`;
   }
 }
@@ -510,14 +516,14 @@ function onChallengeResult(p) {
 
 function onApprovalRequired(p) {
   document.getElementById('approval-gate').classList.remove('hidden');
-  document.getElementById('approval-action-text').textContent = p.proposed_action || '—';
-  addTrace('gate', 'approval required — awaiting human authorization', 'tag-gate');
+  document.getElementById('approval-action-text').textContent = p.proposed_action || '\u2014';
+  addTrace('gate', 'approval required \u2014 awaiting human authorization', 'tag-gate');
 }
 
 function onVerdictLocked(p) {
   const v = p.verdict || {};
   document.getElementById('verdict-bar').classList.remove('hidden');
-  const rc = v.root_cause || '—';
+  const rc = v.root_cause || '\u2014';
   const rcDisplay = formatRootCause(rc);
   document.getElementById('verdict-root-cause').textContent = rcDisplay;
 
@@ -693,17 +699,20 @@ function drawStrings() {
 // ─── Trace log ────────────────────────────────────────────────────────────
 function addTrace(source, msg, cls) {
   const log = document.getElementById('trace-log');
+  if (!log) return;
   const time = ((Date.now() - state.startTime) / 1000).toFixed(1);
   const item = document.createElement('div');
   item.className = `trace-line ${cls || ''}`;
   item.innerHTML = `<span class="trace-time">${time}s</span> <span class="trace-src">${escHtml(source)}</span> <span class="trace-msg">${escHtml(msg)}</span>`;
   log.appendChild(item);
-  log.scrollTop = log.scrollHeight;
+  requestAnimationFrame(() => {
+    log.scrollTop = log.scrollHeight;
+  });
 }
 
 function clearLog() {
   document.getElementById('trace-log').innerHTML = '';
-  document.getElementById('evidence-list').innerHTML = '<div class="italic text-xs text-slate-500 text-center py-6">Awaiting investigation evidence…</div>';
+  document.getElementById('evidence-list').innerHTML = '<div class="italic text-xs text-slate-500 text-center py-6">Awaiting investigation evidence...</div>';
   document.getElementById('ruled-out-list').innerHTML = '';
 }
 
@@ -774,7 +783,12 @@ async function loadCases() {
 }
 
 function renderCases(cases) {
+  const jsonKey = JSON.stringify(cases.map(c => ({ id: c.case_id, st: c.status, conf: c.confidence, active: c.case_id === state.activeCaseId })));
+  if (state.lastCasesKey === jsonKey) return;
+  state.lastCasesKey = jsonKey;
+
   const list = document.getElementById('cases-list');
+  if (!list) return;
   if (!cases.length) {
     list.innerHTML = '<div class="py-6 text-center"><span class="text-xs text-slate-500 font-medium">No cases recorded</span></div>';
     return;

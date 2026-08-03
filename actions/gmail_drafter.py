@@ -77,27 +77,24 @@ def _load_credentials() -> Credentials:
 
 
 def _buyer_email(sender: str | None, order_id: str | None = None) -> str:
-    """The usable To address from the case sender or order ID lookup.
-
-    Prioritizes real inbound email addresses, or falls back to DEFAULT_BUYER_EMAIL
-    (abdulhafeel223@gmail.com) so test & demo emails land directly in the user's inbox.
-    """
-    override = os.environ.get("BUYER_EMAIL_OVERRIDE") or os.environ.get("DEFAULT_BUYER_EMAIL") or os.environ.get("TEST_BUYER_EMAIL")
-
-    if sender:
-        bracketed = re.search(r"<([^<>@]+@[^<>@]+)>", sender)
-        if bracketed:
-            addr = bracketed.group(1).strip()
-            if not any(dummy in addr for dummy in ("example.com", "orbit.local", "globaltraders.in", "acmelogistics.com", "importexport.co.in", "priyatextiles.com", "transportfleet.com", "orbit-operations.com")):
-                return addr
-        raw_match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", sender)
-        if raw_match:
-            addr = raw_match.group(0).strip()
-            if not any(dummy in addr for dummy in ("example.com", "orbit.local", "globaltraders.in", "acmelogistics.com", "importexport.co.in", "priyatextiles.com", "transportfleet.com", "orbit-operations.com")):
-                return addr
-
+    """The usable To address from the case sender or order ID lookup."""
+    override = os.environ.get("BUYER_EMAIL_OVERRIDE")
     if override and "@" in override:
         return override.strip()
+
+    if sender and sender.strip():
+        bracketed = re.search(r"<([^<>@]+@[^<>@]+)>", sender)
+        if bracketed:
+            return bracketed.group(1).strip()
+        raw_match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", sender)
+        if raw_match:
+            return raw_match.group(0).strip()
+        if "." in sender and " " not in sender.strip():
+            return sender.strip()
+
+    default_override = os.environ.get("DEFAULT_BUYER_EMAIL") or os.environ.get("TEST_BUYER_EMAIL")
+    if default_override and "@" in default_override:
+        return default_override.strip()
 
     if order_id and str(order_id) in ORDER_BUYER_EMAILS:
         return ORDER_BUYER_EMAILS[str(order_id)]

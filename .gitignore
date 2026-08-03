@@ -17,6 +17,7 @@ client_secret*.json
 # runtime artifacts
 enterprise/dbs/*.db
 replay/*.json
+*.csv
 
 # os / editor
 .DS_Store

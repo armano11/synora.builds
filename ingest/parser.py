@@ -21,7 +21,6 @@ import re
 from uuid import uuid4
 
 from contracts import CasePayload
-
 from ingest.intent_classifier import classify_email
 
 _ORDER_RE = re.compile(r"#(\d+)|order(?:\s+no\.?|\s+number)?[\s:-]*(\d+)", re.IGNORECASE)
@@ -30,42 +29,32 @@ _ORDER_RE = re.compile(r"#(\d+)|order(?:\s+no\.?|\s+number)?[\s:-]*(\d+)", re.IG
 async def parse_trigger_email(
     subject: str, body: str, sender: str | None, thread_id: str | None
 ) -> CasePayload | None:
-    """Parse one inbound email; CasePayload when it is a real case, else None.
-    
-    SUB-SECOND: Extracts order ID instantly via regex and returns CasePayload.
-    Classification runs asynchronously in background so alerts fire immediately.
-    """
+    """Parse one inbound email; CasePayload when it is a real case, else None."""
     text = f"{subject}\n{body}"
     match = _ORDER_RE.search(text)
     if not match:
         return None
     order_id = match.group(1) or match.group(2)
     clean_subj = subject.strip() or f"Order #{order_id} issue reported"
-    
-    case = CasePayload(
-        case_id=f"email-{order_id}-{uuid4().hex[:8]}",
-        order_id=order_id,
-        symptom=clean_subj[:150],
-        source="email",
-        sender=sender,
-        thread_id=thread_id,
-        intent="inquiry",
-        urgency="medium",
-        summary=clean_subj,
-    )
 
-    # Background async enrichment
-    async def _enrich():
-        try:
-            intent = await classify_email(subject, body)
-            if isinstance(intent, dict):
-                if intent.get("symptom"): case.symptom = intent["symptom"]
-                if intent.get("intent"): case.intent = intent["intent"]
-                if intent.get("urgency"): case.urgency = intent["urgency"]
-                if intent.get("summary"): case.summary = intent["summary"]
-        except Exception:
-            pass
+    try:
+        classification = await classify_email(subject, body)
+        if not isinstance(classification, dict):
+            return None
+        intent = classification.get("intent", "")
+        if intent == "spam":
+            return None
 
-    import asyncio
-    asyncio.create_task(_enrich())
-    return case
+        return CasePayload(
+            case_id=f"email-{order_id}-{uuid4().hex[:8]}",
+            order_id=order_id,
+            symptom=classification.get("symptom") or clean_subj[:150],
+            source="email",
+            sender=sender,
+            thread_id=thread_id,
+            intent=intent or "inquiry",
+            urgency=classification.get("urgency") or "medium",
+            summary=classification.get("summary") or clean_subj,
+        )
+    except Exception:
+        return None

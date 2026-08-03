@@ -456,9 +456,9 @@ def _make_investigator_wrapper(investigator: str, trace_label: str, node_factory
             node = default_node
         
         try:
-            result = await node(state)
+            result = await asyncio.wait_for(node(state), timeout=8.0)
         except Exception as exc:
-            _log.warning("investigator %s failed (degraded): %s — using deterministic DB fallback", investigator, exc)
+            _log.warning("investigator %s failed/timed out (%s) — using zero-downtime DB fallback", investigator, exc)
             order_id = state["case"].order_id
             hypo_id = hypothesis.id
             fallback_ev = _deterministic_evidence_fallback(investigator, hypo_id, order_id)
@@ -528,7 +528,8 @@ def evaluate_condition(condition: str, facts: dict) -> bool:
                 equal = str(actual).lower() == value.strip("\"'").lower()
                 return equal if op == "=" else not equal
             try:
-                a, b = float(actual), float(value)
+                value_clean = value.strip("\"'").rstrip("h")
+                a, b = float(actual), float(value_clean)
             except (TypeError, ValueError):
                 return False
             return {"<": a < b, ">": a > b}[op]
@@ -550,6 +551,7 @@ def facts_from_evidence(evidence: list[Evidence]) -> dict:
             facts["tax_rate_wrong"] = raw.get("tax_rate_wrong", 0)
         if "transport_booking" in raw:
             facts["order_status"] = raw.get("status")
+            facts["status"] = raw.get("status")
             facts["transport_booking"] = raw.get("transport_booking")
             facts["payment_received"] = raw.get("payment_received", 0)
             facts["stock_booked"] = raw.get("stock_booked", 1)
@@ -561,16 +563,16 @@ def facts_from_evidence(evidence: list[Evidence]) -> dict:
             facts["vehicle_no"] = raw.get("vehicle_no")
             facts["license_expired"] = raw.get("license_expired", 0)
             facts["transport_delivered"] = raw.get("delivered", 0)
-            facts["breakdown_claimed"] = raw.get("breakdown_claimed")
-            facts["vehicle_no"] = raw.get("vehicle_no")
-            facts["license_expired"] = raw.get("license_expired", 0)
-            facts["transport_delivered"] = raw.get("delivered", 0)
         if "last_scan_at" in raw:
             try:
                 scan = datetime.strptime(raw["last_scan_at"], "%Y-%m-%d %H:%M:%S").date()
+                hours = (SCENARIO_TODAY - scan).days * 24
                 facts["last_scan_age_days"] = (SCENARIO_TODAY - scan).days
+                facts["last_scan"] = hours
             except ValueError:
                 pass
+            if "status" in raw:
+                facts["status"] = raw.get("status")
         # Also extract from items (inventory mismatch)
         if "items" in raw and raw["items"]:
             for item in raw["items"]:
@@ -616,12 +618,11 @@ def synthesizer_node(state: InvestigationState) -> dict:
             )
 
     total_h = max(1, len(hypothesis_ids))
-    strength = 0.70 if culprit else 0.0
-    coverage = 0.15 * (len(eliminated) / total_h)
-    total_p = max(1, len(rules))
-    agreement = 0.10 * (len(portal_verdicts) / max(1, total_p))
+    strength = 1.0 if culprit else 0.0
+    coverage = 0.30 * (len(eliminated) / total_h)
+    agreement = 0.20 * (len(portal_verdicts) / 4)
     challenge_bonus = 0.06 if state.get("challenge") and state["challenge"].survived else 0.0
-    confidence = min(0.99, strength + coverage + agreement + challenge_bonus)
+    confidence = min(0.99, 0.50 * strength + coverage + agreement + challenge_bonus)
 
     root_cause = f"{case_type}.{culprit}" if culprit else f"{case_type}.unknown"
     verdict = Verdict(
@@ -656,12 +657,7 @@ def synthesizer_node(state: InvestigationState) -> dict:
     return {"verdict": verdict, "trace": trace}
 
 def route_after_synthesis(state: InvestigationState) -> Literal["challenger", "router", "approve", "end"]:
-    """Route after synthesis. Threshold lowered to 0.65 to handle fallback evidence.
-    
-    When investigators use deterministic DB fallback (no LLM needed), evidence is
-    reliable but doesn't carry the full LLM-enriched eliminates set. Lowering the
-    threshold ensures we still reach approval gate and send Telegram report.
-    """
+    """Route after synthesis based on confidence threshold and loop count."""
     if state.get("challenge") is not None:
         if state["challenge"].survived:
             return "approve"
@@ -671,14 +667,10 @@ def route_after_synthesis(state: InvestigationState) -> Literal["challenger", "r
     )
     confidence = verdict.confidence
     has_culprit = verdict.root_cause and not verdict.root_cause.endswith(".unknown")
-    # Proceed to challenger if confident enough OR if culprit found after second loop
-    if confidence >= 0.65 and has_culprit:
+    if confidence >= 0.70 and has_culprit:
         return "challenger"
     if state.get("loop_count", 0) < 1:
         return "router"
-    # Even if confidence is low, go to approve if culprit is found
-    if has_culprit:
-        return "approve"
     return "end"
 
 # ---------------------------------------------------------------------------

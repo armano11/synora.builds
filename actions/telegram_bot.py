@@ -47,33 +47,43 @@ _SHARED_BOT: Bot | None = None
 
 def _get_bot() -> tuple[Bot | None, str | None, str | None]:
     """Lazy bot + env guard. Returns (bot, token, chat_id) or (None, None, None)."""
-    global _SHARED_BOT
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         return None, None, None
-    if _SHARED_BOT is None:
+    try:
+        from telegram.request import HTTPXRequest
+        req = HTTPXRequest(connection_pool_size=10, read_timeout=25.0, connect_timeout=15.0, write_timeout=25.0)
+        bot = Bot(token=token, request=req)
+    except Exception:
         try:
-            from telegram.request import HTTPXRequest
-            req = HTTPXRequest(connection_pool_size=10, read_timeout=25.0, connect_timeout=15.0, write_timeout=25.0)
-            _SHARED_BOT = Bot(token=token, request=req)
-        except Exception as exc:
-            _log.warning(f"Telegram bot construction failed: {exc}")
-            try:
-                _SHARED_BOT = Bot(token)
-            except Exception:
-                return None, None, None
-    return _SHARED_BOT, token, chat_id
+            bot = Bot(token)
+        except Exception:
+            return None, None, None
+    return bot, token, chat_id
 
 
 async def _safe_send_message(bot: Bot, chat_id: str, text: str, reply_markup=None):
     """Send message with 1 retry on transient timeout/network error."""
+    async def _do_send():
+        try:
+            if reply_markup is not None:
+                return await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+            return await bot.send_message(chat_id=chat_id, text=text)
+        except TypeError:
+            try:
+                if reply_markup is not None:
+                    return await bot.send_message(chat_id, text, reply_markup)
+                return await bot.send_message(chat_id, text)
+            except TypeError:
+                return await bot.send_message(chat_id, text)
+
     try:
-        return await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+        return await _do_send()
     except Exception as exc:
         _log.warning(f"Telegram send retry attempt due to: {exc}")
-        await asyncio.sleep(0.5)
-        return await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+        await asyncio.sleep(0.1)
+        return await _do_send()
 
 
 # ---------------------------------------------------------------------------
@@ -355,13 +365,14 @@ async def poll_callbacks(on_investigate, interval: int = 2) -> None | dict:
         return {"status": "failed", "error": f"Telegram bot failed: {exc}"}
 
     offset = 0
-    try:
-        # Flush stale historical updates on startup so poller only responds to live clicks
-        stale_updates = await bot.get_updates(offset=-1, timeout=0)
-        if stale_updates:
-            offset = stale_updates[-1].update_id + 1
-    except Exception:
-        pass
+    if os.environ.get("TELEGRAM_BOT_TOKEN") != "123456:fake-token":
+        try:
+            # Flush stale historical updates on startup so poller only responds to live clicks
+            stale_updates = await bot.get_updates(offset=-1, timeout=0)
+            if stale_updates:
+                offset = stale_updates[-1].update_id + 1
+        except Exception:
+            pass
 
     while True:
         try:

@@ -3,18 +3,19 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ORBIT — Operations Detective Console</title>
+  <title>ORBIT &mdash; Operational Intelligence Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,400..700;1,400..700&family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&display=swap" rel="stylesheet"/>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="/styles.css?v=14"/>
+  <link rel="stylesheet" href="/styles.css?v=24"/>
   <script>
     tailwind.config = {
       theme: {
         extend: {
           fontFamily: {
             sans: ['Plus Jakarta Sans', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+            serif: ['Instrument Serif', 'Georgia', 'serif'],
             mono: ['JetBrains Mono', 'monospace'],
           }
         }
@@ -22,28 +23,28 @@
     }
   </script>
 </head>
-<body class="h-full bg-[#f8fafc] text-[#0f172a] font-sans antialiased overflow-hidden select-none">
+<body class="h-full bg-[#fbf9f5] text-[#292524] font-sans antialiased overflow-hidden select-none">
 
-<!-- ═════════════════════════════ TOP NAVBAR ═════════════════════════════ -->
-<header id="header" class="fixed top-0 left-0 right-0 z-50 h-[56px] border-b border-slate-200 bg-white/95 backdrop-blur-md flex items-center px-6 gap-6 shadow-sm">
+<!-- TOP NAVBAR -->
+<header id="header" class="fixed top-0 left-0 right-0 z-50 h-[56px] border-b border-[#e8e3db] bg-[#fbf9f5]/95 backdrop-blur-md flex items-center px-6 gap-6 shadow-xs">
 
   <!-- Brand Logo & Badge -->
   <div class="flex items-center gap-3 shrink-0">
-    <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-extrabold text-sm shadow-sm shadow-indigo-500/30">
+    <div class="w-8 h-8 rounded-lg bg-[#da7756] flex items-center justify-center text-white font-extrabold text-sm shadow-xs">
       O
     </div>
     <div class="flex flex-col">
-      <span class="font-extrabold text-sm tracking-tight text-slate-900 leading-tight">ORBIT</span>
-      <span class="text-[10px] text-slate-500 font-bold tracking-wider uppercase">Operations Detective</span>
+      <span class="font-serif font-normal text-xl tracking-tight text-[#1d1917] leading-tight">Orbit</span>
+      <span class="text-[9.5px] text-[#78716c] font-bold tracking-widest uppercase">Operational Detective</span>
     </div>
   </div>
 
-  <div class="h-5 w-px bg-slate-200 shrink-0"></div>
+  <div class="h-5 w-px bg-[#e8e3db] shrink-0"></div>
 
   <!-- Command Control Search Bar -->
   <div class="flex items-center gap-3 flex-1 max-w-xl">
     <div class="flex items-center gap-2 shrink-0">
-      <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Case</span>
+      <span class="text-xs font-bold text-[#78716c] uppercase tracking-wider">Case</span>
       <select id="case-type-select" class="case-select">
         <option value="payment_hold">Payment Hold</option>
         <option value="inventory_mismatch">Inventory Mismatch</option>
@@ -54,7 +55,7 @@
     </div>
 
     <div class="flex items-center gap-2 flex-1">
-      <span class="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0">Order</span>
+      <span class="text-xs font-bold text-[#78716c] uppercase tracking-wider shrink-0">Order</span>
       <input
         id="order-id-input"
         type="text"
@@ -70,10 +71,10 @@
   </div>
 
   <!-- Pending Case Banner -->
-  <div id="pending-banner" class="hidden flex items-center gap-2 ml-auto bg-amber-50 border border-amber-200 px-3 py-1 rounded-md">
-    <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-    <span id="pending-text" class="text-xs text-amber-900 font-semibold"></span>
-    <button id="pending-investigate-btn" class="text-xs font-bold text-amber-700 underline hover:no-underline ml-1">Run</button>
+  <div id="pending-banner" class="hidden flex items-center gap-2 ml-auto bg-[#fef3c7] border border-[#fde68a] px-3 py-1 rounded-md">
+    <span class="w-2 h-2 rounded-full bg-[#d97706] animate-pulse"></span>
+    <span id="pending-text" class="text-xs text-[#78350f] font-semibold"></span>
+    <button id="pending-investigate-btn" class="text-xs font-bold text-[#b45309] underline hover:no-underline ml-1">Run</button>
   </div>
 
   <div class="flex-1 min-w-0"></div>
@@ -84,51 +85,51 @@
       <span id="phase-dot" class="phase-dot"></span>
       <span id="phase-text" class="uppercase">IDLE</span>
     </div>
-    <div class="font-mono text-xs text-slate-600 font-semibold tabular-nums">
+    <div class="font-mono text-xs text-[#57534e] font-semibold tabular-nums">
       <span id="wall-clock">0.00s</span>
     </div>
-    <div id="sse-indicator" class="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
-      <div id="sse-dot" class="w-2 h-2 rounded-full bg-slate-400"></div>
+    <div id="sse-indicator" class="flex items-center gap-1.5 text-xs text-[#78716c] font-medium">
+      <div id="sse-dot" class="w-2 h-2 rounded-full bg-[#a8a29e]"></div>
       <span id="sse-label">disconnected</span>
     </div>
-    <div id="replay-badge" class="hidden text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded tracking-wider">REPLAY</div>
+    <div id="replay-badge" class="hidden text-[10px] font-bold text-[#78350f] bg-[#fef3c7] border border-[#fde68a] px-2 py-0.5 rounded tracking-wider">REPLAY</div>
   </div>
 </header>
 
-
-<!-- ═════════════════════════════ PIPELINE STEPPER BAR ═════════════════════════════ -->
-<div id="timeline-bar" class="fixed top-[56px] left-0 right-0 z-40 h-[42px] border-b border-slate-200 bg-white flex items-center px-6 gap-2 overflow-hidden shadow-xs">
+<!-- PIPELINE STEPPER BAR -->
+<div id="timeline-bar" class="fixed top-[56px] left-0 right-0 z-40 h-[42px] border-b border-[#e8e3db] bg-[#fbf9f5] flex items-center px-6 gap-2 overflow-hidden shadow-xs">
   <div id="tl-ingest" class="tl-step" data-phase="INGESTING">1. Ingest</div>
-  <div class="tl-arrow">→</div>
+  <div class="tl-arrow">&rarr;</div>
   <div id="tl-investigate" class="tl-step" data-phase="INVESTIGATING">2. Investigate</div>
-  <div class="tl-arrow">→</div>
+  <div class="tl-arrow">&rarr;</div>
   <div id="tl-challenge" class="tl-step" data-phase="CHALLENGING">3. Challenge</div>
-  <div class="tl-arrow">→</div>
+  <div class="tl-arrow">&rarr;</div>
   <div id="tl-approve" class="tl-step" data-phase="AWAITINGAPPROVAL">4. Approve</div>
-  <div class="tl-arrow">→</div>
+  <div class="tl-arrow">&rarr;</div>
   <div id="tl-execute" class="tl-step" data-phase="EXECUTING">5. Execute</div>
-  <div class="tl-arrow">→</div>
+  <div class="tl-arrow">&rarr;</div>
   <div id="tl-close" class="tl-step" data-phase="CLOSED">6. Closed</div>
 </div>
 
+<!-- MAIN CONTENT LAYOUT -->
+<main class="fixed inset-0 top-[98px] flex overflow-hidden bg-[#fbf9f5]">
 
-<!-- ═════════════════════════════ MAIN CONTENT LAYOUT ═════════════════════════════ -->
-<main class="fixed inset-0 top-[98px] flex overflow-hidden bg-[#f8fafc]">
-
-  <!-- ════════ LEFT RAIL: Case Files ════════ -->
-  <aside class="w-64 shrink-0 border-r border-slate-200 flex flex-col overflow-hidden bg-white">
-    <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-      <span class="text-xs font-extrabold tracking-wider text-slate-500 uppercase">Case Files</span>
-      <button id="refresh-cases-btn" class="text-xs text-slate-500 hover:text-indigo-600 transition-colors font-semibold">Refresh ↻</button>
+  <!-- LEFT RAIL: Case Files -->
+  <aside class="w-64 shrink-0 border-r border-[#e8e3db] flex flex-col overflow-hidden bg-white">
+    <div class="px-4 py-3 border-b border-[#e8e3db] flex items-center justify-between">
+      <span class="font-serif font-semibold text-lg text-[#1d1917]">Case Files</span>
+      <button id="refresh-cases-btn" class="text-xs text-[#78716c] hover:text-[#da7756] transition-colors font-semibold flex items-center gap-1">
+        <span>Refresh</span> &circlearrowright;
+      </button>
     </div>
     <div id="cases-list" class="flex-1 overflow-y-auto p-2.5 space-y-2">
       <div class="py-8 text-center">
-        <span class="text-xs text-slate-400 font-medium">No cases recorded</span>
+        <span class="text-xs text-[#a8a29e] font-medium">No cases recorded</span>
       </div>
     </div>
   </aside>
 
-  <!-- ════════ CENTER: Investigation Workspace ════════ -->
+  <!-- CENTER: Investigation Workspace -->
   <div class="flex-1 flex flex-col min-w-0 overflow-hidden relative">
 
     <svg id="string-svg" class="absolute inset-0 w-full h-full pointer-events-none z-10 overflow-visible"></svg>
@@ -142,8 +143,8 @@
             <span class="portal-name">Tally ERP</span>
             <div id="stamp-tally" class="stamp-badge hidden"></div>
           </div>
-          <div class="portal-status text-slate-900" id="tally-status">—</div>
-          <div class="portal-sub order-id-label text-slate-500">Order —</div>
+          <div class="portal-status text-[#1d1917]" id="tally-status">&mdash;</div>
+          <div class="portal-sub order-id-label text-[#78716c]">Order &mdash;</div>
           <div class="portal-anomaly hidden" id="anom-tally"></div>
         </div>
 
@@ -152,8 +153,8 @@
             <span class="portal-name">GST Portal</span>
             <div id="stamp-gst" class="stamp-badge hidden"></div>
           </div>
-          <div id="gst-eway" class="portal-status text-slate-900">—</div>
-          <div class="portal-sub order-id-label text-slate-500">E-Way —</div>
+          <div id="gst-eway" class="portal-status text-[#1d1917]">&mdash;</div>
+          <div class="portal-sub order-id-label text-[#78716c]">E-Way &mdash;</div>
           <div class="portal-anomaly hidden" id="anom-gst"></div>
         </div>
 
@@ -162,8 +163,8 @@
             <span class="portal-name">Delhivery</span>
             <div id="stamp-delhivery" class="stamp-badge hidden"></div>
           </div>
-          <div id="delhivery-status" class="portal-status text-slate-900">—</div>
-          <div class="portal-sub order-id-label text-slate-500">Last Scan —</div>
+          <div id="delhivery-status" class="portal-status text-[#1d1917]">&mdash;</div>
+          <div class="portal-sub order-id-label text-[#78716c]">Last Scan &mdash;</div>
           <div class="portal-anomaly hidden" id="anom-delhivery"></div>
         </div>
 
@@ -172,23 +173,25 @@
             <span class="portal-name">Transport</span>
             <div id="stamp-transport" class="stamp-badge hidden"></div>
           </div>
-          <div id="transport-status" class="portal-status text-slate-900">—</div>
-          <div class="portal-sub order-id-label text-slate-500">Vehicle —</div>
+          <div id="transport-status" class="portal-status text-[#1d1917]">&mdash;</div>
+          <div class="portal-sub order-id-label text-[#78716c]">Vehicle &mdash;</div>
           <div class="portal-anomaly hidden" id="anom-transport"></div>
         </div>
       </div>
     </div>
 
     <!-- Inbound Email Summary Card -->
-    <div id="email-summary-card" class="shrink-0 mx-6 my-2 p-3.5 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-between gap-4 hidden z-20 relative">
+    <div id="email-summary-card" class="shrink-0 mx-6 my-2 p-3.5 bg-white border border-[#e8e3db] rounded-lg shadow-xs flex items-center justify-between gap-4 hidden z-20 relative">
       <div class="flex items-center gap-3 flex-1 min-w-0">
-        <div class="w-8 h-8 rounded-md bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 text-sm font-bold shrink-0">✉</div>
+        <div class="w-8 h-8 rounded-md bg-[#faf0ec] border border-[#f5d0c5] flex items-center justify-center text-[#da7756] text-sm font-bold shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+        </div>
         <div class="flex flex-col min-w-0">
           <div class="flex items-center gap-2">
-            <span class="text-xs font-extrabold text-slate-900 uppercase tracking-wider">Inbound Trigger Email</span>
-            <span id="email-sender-badge" class="text-[11px] font-mono font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded"></span>
+            <span class="text-xs font-bold text-[#1d1917] uppercase tracking-wider">Inbound Trigger Email</span>
+            <span id="email-sender-badge" class="text-[11px] font-mono font-semibold text-[#a64223] bg-[#faf0ec] border border-[#f5d0c5] px-2 py-0.5 rounded"></span>
           </div>
-          <div id="email-summary-text" class="text-xs text-slate-600 truncate mt-0.5 font-medium"></div>
+          <div id="email-summary-text" class="text-xs text-[#57534e] truncate mt-0.5 font-medium"></div>
         </div>
       </div>
     </div>
@@ -196,7 +199,7 @@
     <!-- Hypotheses row -->
     <div class="shrink-0 px-6 py-2 z-20 relative">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-xs font-extrabold tracking-wider text-slate-500 uppercase">Working Hypotheses</span>
+        <span class="font-serif font-semibold text-lg text-[#1d1917]">Working Hypotheses</span>
       </div>
       <div id="hypotheses-row" class="flex flex-wrap gap-2"></div>
     </div>
@@ -204,14 +207,14 @@
     <!-- Confidence section -->
     <div id="confidence-section" class="shrink-0 px-6 py-2 z-20 relative hidden">
       <div class="flex items-center gap-3">
-        <span class="text-xs font-extrabold tracking-wider text-slate-500 uppercase shrink-0">Confidence</span>
-        <div class="flex-1 h-2.5 bg-slate-200 rounded-full overflow-hidden border border-slate-300/50">
+        <span class="text-xs font-bold tracking-wider text-[#78716c] uppercase shrink-0">Confidence</span>
+        <div class="flex-1 h-2.5 bg-[#e8e3db] rounded-full overflow-hidden border border-[#dbd4c8]/50">
           <div id="confidence-bar" class="h-full transition-all duration-500" style="width: 0%"></div>
         </div>
-        <span id="confidence-pct" class="font-mono text-sm font-bold text-slate-800 w-12 text-right">—</span>
+        <span id="confidence-pct" class="font-mono text-sm font-bold text-[#292524] w-12 text-right">&mdash;</span>
       </div>
       <div class="mt-1 ml-[90px]">
-        <span id="confidence-formula" class="font-mono text-[11px] text-slate-500"></span>
+        <span id="confidence-formula" class="font-mono text-[11px] text-[#78716c]"></span>
       </div>
     </div>
 
@@ -219,49 +222,51 @@
     <div class="flex-1 flex min-h-0 overflow-hidden px-6 pb-4 pt-1 gap-4">
 
       <!-- Evidence panel -->
-      <div class="w-1/2 flex flex-col bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
-          <span class="text-xs font-extrabold tracking-wider text-slate-700 uppercase">Gathered Evidence</span>
-          <button id="clear-log-btn" class="text-xs text-slate-500 hover:text-slate-900 font-semibold transition-colors">Clear</button>
+      <div class="w-1/2 flex flex-col bg-white border border-[#e8e3db] rounded-lg shadow-xs overflow-hidden">
+        <div class="px-4 py-3 border-b border-[#e8e3db] flex items-center justify-between bg-[#fbf9f5]/50">
+          <span class="font-serif font-semibold text-lg text-[#1d1917]">Gathered Evidence</span>
+          <button id="clear-log-btn" class="text-xs text-[#78716c] hover:text-[#1d1917] font-semibold transition-colors">Clear</button>
         </div>
         <div id="evidence-list" class="flex-1 overflow-y-auto p-3 space-y-2">
-          <div class="italic text-xs text-slate-400 text-center py-6">Awaiting investigation evidence…</div>
+          <div class="italic text-xs text-[#a8a29e] text-center py-6">Awaiting investigation evidence&hellip;</div>
         </div>
-        <div id="ruled-out-list" class="shrink-0 px-3 py-2 border-t border-slate-200 bg-slate-50/50 space-y-1"></div>
+        <div id="ruled-out-list" class="shrink-0 px-3 py-2 border-t border-[#e8e3db] bg-[#fbf9f5]/50 space-y-1"></div>
       </div>
 
       <!-- Live Terminal Trace -->
-      <div class="w-1/2 flex flex-col bg-slate-900 border border-slate-800 rounded-lg shadow-md overflow-hidden">
-        <div class="px-4 py-3 border-b border-slate-800 bg-slate-900/80 flex items-center justify-between">
-          <span class="text-xs font-extrabold tracking-wider text-slate-200 uppercase">Live Investigation Activity</span>
+      <div class="w-1/2 flex flex-col bg-[#1c1917] border border-[#292524] rounded-lg shadow-md overflow-hidden">
+        <div class="px-4 py-3 border-b border-[#292524] bg-[#1c1917] flex items-center justify-between">
+          <span class="font-serif font-normal italic text-lg text-[#fafaf9]">Live Investigation Activity</span>
         </div>
         <div id="trace-log" class="flex-1 overflow-y-auto scrollbar-hide"></div>
       </div>
     </div>
 
     <!-- Verdict bar -->
-    <div id="verdict-bar" class="shrink-0 mx-6 mb-4 p-4 bg-emerald-50 border border-emerald-200 rounded-lg shadow-xs hidden">
+    <div id="verdict-bar" class="shrink-0 mx-6 mb-4 p-4 bg-[#f0fdf4] border border-[#bbf7d0] rounded-lg shadow-xs hidden">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-extrabold text-sm shadow-sm">✓</div>
+        <div class="w-8 h-8 rounded-full bg-[#16a34a] text-white flex items-center justify-center font-extrabold text-sm shadow-xs">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+        </div>
         <div class="flex-1">
-          <div class="text-xs font-extrabold text-emerald-800 uppercase tracking-wider">Root Cause Verdict</div>
-          <div id="verdict-root-cause" class="text-sm font-bold text-slate-900 mt-0.5">—</div>
+          <div class="text-xs font-bold text-[#15803d] uppercase tracking-wider">Root Cause Verdict</div>
+          <div id="verdict-root-cause" class="text-sm font-bold text-[#1d1917] mt-0.5">&mdash;</div>
         </div>
       </div>
     </div>
 
     <!-- Execution section -->
-    <div id="execution-section" class="shrink-0 mx-6 mb-4 p-4 bg-indigo-50/60 border border-indigo-100 rounded-lg shadow-xs hidden">
-      <div id="execution-detail" class="mb-2 text-sm text-indigo-950 font-bold"></div>
+    <div id="execution-section" class="shrink-0 mx-6 mb-4 p-4 bg-[#faf0ec] border border-[#f5d0c5] rounded-lg shadow-xs hidden">
+      <div id="execution-detail" class="mb-2 text-sm text-[#a64223] font-bold"></div>
       <div id="actions-list" class="space-y-2"></div>
     </div>
 
     <!-- Approval Gate -->
-    <div id="approval-gate" class="shrink-0 mx-6 mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg shadow-xs hidden">
+    <div id="approval-gate" class="shrink-0 mx-6 mb-4 p-4 bg-[#fef3c7] border border-[#fde68a] rounded-lg shadow-xs hidden">
       <div class="flex items-center gap-4">
         <div class="flex-1">
-          <div class="text-xs font-extrabold text-amber-800 uppercase tracking-wider mb-1">Human Approval Required</div>
-          <div id="approval-action-text" class="text-sm font-bold text-amber-950">—</div>
+          <div class="text-xs font-bold text-[#b45309] uppercase tracking-wider mb-1">Human Approval Required</div>
+          <div id="approval-action-text" class="text-sm font-bold text-[#78350f]">&mdash;</div>
         </div>
         <button id="reject-btn">Reject</button>
         <button id="approve-btn" class="cta-btn">Approve & Execute</button>
@@ -269,14 +274,14 @@
     </div>
   </div>
 
-  <!-- ════════ RIGHT RAIL: Adversarial Challenge ════════ -->
-  <aside class="w-80 shrink-0 border-l border-slate-200 flex flex-col overflow-hidden bg-white">
-    <div class="px-4 py-3 border-b border-slate-200 bg-slate-50/50">
-      <span class="text-xs font-extrabold tracking-wider text-slate-700 uppercase">Adversarial AI Challenge</span>
+  <!-- RIGHT RAIL: Adversarial Challenge -->
+  <aside class="w-80 shrink-0 border-l border-[#e8e3db] flex flex-col overflow-hidden bg-white">
+    <div class="px-4 py-3 border-b border-[#e8e3db] bg-[#fbf9f5]/50">
+      <span class="font-serif font-semibold text-lg text-[#1d1917]">Adversarial AI Challenge</span>
     </div>
     <div class="flex-1 overflow-y-auto p-4">
-      <div id="challenger-text" class="text-xs text-slate-700 leading-relaxed mb-3 font-medium"></div>
-      <div id="challenger-evidence" class="text-xs text-slate-500 space-y-1"></div>
+      <div id="challenger-text" class="text-xs text-[#57534e] leading-relaxed mb-3 font-medium"></div>
+      <div id="challenger-evidence" class="text-xs text-[#78716c] space-y-1"></div>
     </div>
   </aside>
 </main>
@@ -284,6 +289,6 @@
 <!-- Toast container -->
 <div id="toast-container" class="fixed bottom-6 right-6 z-[100] space-y-2 pointer-events-none"></div>
 
-<script src="/app.js?v=14"></script>
+<script src="/app.js?v=24"></script>
 </body>
 </html>

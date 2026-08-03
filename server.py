@@ -48,8 +48,10 @@ REPLAY_DIR.mkdir(exist_ok=True)
 # In-memory case & stream tracking
 # ---------------------------------------------------------------------------
 
+from collections import defaultdict
+
 _cases: dict[str, dict] = {}
-_streams: dict[str, asyncio.Queue] = {}
+_streams: dict[str, set[asyncio.Queue]] = defaultdict(set)
 
 def _register_case(case: CasePayload, status: str = "active") -> dict:
     info = {
@@ -135,32 +137,30 @@ async def api_investigate_pending(case_id: str):
 
 @app.get("/api/stream/{case_id}")
 async def api_stream(case_id: str):
-    # Use existing queue if investigation is already running, else create new
-    if case_id in _streams and not _streams[case_id].empty():
-        queue = _streams[case_id]
-    else:
-        queue = asyncio.Queue()
-        _streams[case_id] = queue
+    queue = asyncio.Queue()
+    _streams[case_id].add(queue)
 
     # Replay already-seen events for this case (browser reconnect safety)
     if case_id in _cases:
-        for ev in _cases[case_id].get("events", []):
+        for ev in list(_cases[case_id].get("events", [])):
             await queue.put(ev)
-        # If case is already closed, immediately signal end
         if _cases[case_id].get("status") == "closed":
             await queue.put(None)
 
     async def event_generator():
-        while True:
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=30.0)
-                if event is None:  # sentinel — stream done
-                    return
-                yield f"data: {json.dumps(event)}\n\n"
-            except asyncio.TimeoutError:
-                yield f": keepalive\n\n"
-            except asyncio.CancelledError:
-                return
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    if event is None:  # sentinel — stream done
+                        return
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    yield f": keepalive\n\n"
+        except asyncio.CancelledError:
+            return
+        finally:
+            _streams[case_id].discard(queue)
 
     return StreamingResponse(
         event_generator(),
@@ -338,8 +338,7 @@ async def _run_investigation(case: CasePayload, resume: dict | None = None):
             last_event_name = ev.get("event")
             if case_id in _cases:
                 _cases[case_id]["events"].append(ev)
-            q = _streams.get(case_id)
-            if q:
+            for q in list(_streams.get(case_id, [])):
                 await q.put(ev)
             if case_id in _cases:
                 if last_event_name == "case_closed":
@@ -380,14 +379,13 @@ async def _run_investigation(case: CasePayload, resume: dict | None = None):
         error_ev = {"event": "error", "where": "server", "message": str(exc), "degraded": True}
         events.append(error_ev)
         last_event_name = "error"
-        q = _streams.get(case_id)
-        if q:
+        for q in list(_streams.get(case_id, [])):
             await q.put(error_ev)
         log.error(f"Investigation {case_id} failed: {exc}")
     finally:
-        q = _streams.get(case_id)
-        if q and last_event_name != "approval_required":
-            await q.put(None)
+        if last_event_name != "approval_required":
+            for q in list(_streams.get(case_id, [])):
+                await q.put(None)
 
     # Save replay file (merge with existing on resume)
     try:

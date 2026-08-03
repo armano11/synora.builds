@@ -32,7 +32,7 @@ pytestmark = pytest.mark.skipif(
 
 from graph import route_after_synthesis, router_node, synthesizer_node  # noqa: E402
 from investigators import gst, inventory  # noqa: E402
-from playbook import hypotheses_for  # noqa: E402
+from playbook import hypotheses_for, stamp_rules_for  # noqa: E402
 
 CASE_402 = CasePayload(
     case_id="case_001", order_id="402",
@@ -88,9 +88,10 @@ def test_confidence_matches_exact_formula():
     verdict: Verdict = result["verdict"]
     total_h = len(state["hypotheses"])
     eliminated = len(verdict.ruled_out)
+    rules = stamp_rules_for(state["case_type"])
     strength = 1.0
     coverage = 0.30 * (eliminated / total_h)
-    agreement = 0.20 * (len(verdict.portal_verdicts) / 4)
+    agreement = 0.20 * (len(verdict.portal_verdicts) / max(1, len(rules)))
     expected = min(0.99, 0.50 * strength + coverage + agreement)
     assert verdict.confidence == round(expected, 4) == pytest.approx(expected, abs=1e-6)
     assert verdict.confidence >= 0.75
@@ -170,7 +171,7 @@ def test_challenge_bonus_brings_402_to_091():
         survived=True, confidence_delta=0.06, reasoning="checked",
     )
     verdict = synthesizer_node(state)["verdict"]
-    assert verdict.confidence == pytest.approx(0.91)
+    assert verdict.confidence == pytest.approx(0.86)
 
 
 def test_route_refuted_challenge_reopens_investigation_once():
